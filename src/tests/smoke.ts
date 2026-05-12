@@ -173,6 +173,11 @@ console.log("\n=== Prompt Builders ===");
     "user message includes character",
   );
   assert(msgs[1].content.includes("60"), "user message includes duration");
+  assert(msgs[1].content.includes("9 shots"), "user message specifies 9 shots");
+  assert(
+    msgs[1].content.includes("4 acts"),
+    "user message includes numActs for 60s",
+  );
 }
 
 {
