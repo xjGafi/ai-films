@@ -13,7 +13,7 @@ dist/
 projects/
 
 # Local config overrides (personal, not for sharing)
-film.local.json
+*.local.json
 
 # Claude Code local settings
 .claude/
