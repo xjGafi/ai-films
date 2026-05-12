@@ -19,6 +19,7 @@ import { buildCharacterSheetPrompt } from "../prompts/character-sheet.js";
 import { buildScreenplayPrompt } from "../prompts/screenplay.js";
 import { buildStoryboardPrompt } from "../prompts/storyboard.js";
 import { buildSeedancePrompt } from "../prompts/video-shot.js";
+import { imagePathToDataUri } from "../providers/volcengine.js";
 import type {
   CharacterSpec,
   ProjectConfig,
@@ -269,6 +270,32 @@ console.log("\n=== Prompt Builders ===");
   assert(prompt.includes("[Row 1 — 0–5s]"), "row 1 header present");
   assert(prompt.includes("[Row 2 — 5–10s]"), "row 2 header present");
   assert(prompt.includes("[Row 3 — 10–15s]"), "row 3 header present");
+}
+
+// ─── 4. imagePathToDataUri ───
+
+console.log("\n=== imagePathToDataUri ===");
+{
+  const tmpFile = path.join(os.tmpdir(), "ai-films-test-img.png");
+  const testContent = Buffer.from("fake-png-content-for-testing");
+  fs.writeFileSync(tmpFile, testContent);
+
+  try {
+    const dataUri = imagePathToDataUri(tmpFile);
+
+    assert(
+      dataUri.startsWith("data:image/png;base64,"),
+      "imagePathToDataUri: correct data URI prefix for .png",
+    );
+
+    const decoded = Buffer.from(dataUri.split(",")[1], "base64");
+    assert(
+      decoded.equals(testContent),
+      "imagePathToDataUri: decoded bytes match original file content",
+    );
+  } finally {
+    fs.unlinkSync(tmpFile);
+  }
 }
 
 // ─── Summary ───
