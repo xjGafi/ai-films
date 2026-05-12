@@ -16,7 +16,7 @@ const GRID_ROWS = 3;
  * Stage 2: Generate storyboard images and crop row strips.
  *
  * For each act in the screenplay:
- * - Generate a fixed 4×3 grid storyboard image.
+ * - Generate a fixed 3×3 grid storyboard image.
  * - Crop 3 horizontal row strips from the grid.
  * - Place each strip on a 1920×1080 16:9 canvas (letterboxed).
  * - Pass continuity info (last shot of previous act) to the next act's prompt.
