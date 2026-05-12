@@ -142,7 +142,6 @@ export async function concatenateClips(
   const filterComplex = filterParts.join(";");
 
   const cmd = [
-    "ffmpeg",
     "-y",
     ...inputs,
     "-filter_complex",
