@@ -22,7 +22,6 @@ import { buildSeedancePrompt } from "../prompts/video-shot.js";
 import type {
   CharacterSpec,
   ProjectConfig,
-  Screenplay,
   ShotSpec,
   VideoPromptConfig,
 } from "../types.js";

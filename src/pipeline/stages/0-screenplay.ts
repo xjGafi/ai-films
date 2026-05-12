@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { buildScreenplayPrompt } from "../../prompts/screenplay.js";
-import { chat, saveBuffer } from "../../providers/volcengine.js";
+import { chat } from "../../providers/volcengine.js";
 import type { Screenplay, StageResult } from "../../types.js";
 import type { ProjectState } from "../state.js";
 

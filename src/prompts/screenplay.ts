@@ -82,10 +82,10 @@ KEY REQUIREMENTS:
    - Emotional expressions visible on screen
    - Any relevant props or objects
 
-7. SHOT PACING: Vary pace to match the emotional arc:
-   - slow: 3-4 shots per 15s (landscape, emotion, dialogue)
-   - medium: 5-6 shots per 15s (standard narrative)
-   - fast: 8-10 shots per 15s (action, montage)
+7. SHOT PACING: Use the pace tag to indicate the editing rhythm of each individual shot — not shot count (shot count is always 9 per act):
+   - slow: long lingering shot (~2–3s), contemplative movement, landscape, emotion
+   - medium: standard cadence (~1.5–2s), narrative scenes, dialogue
+   - fast: short sharp shot (~0.5–1s), action, impact, rapid cuts
 
 8. CAMERA LANGUAGE: Use precise camera direction terms:
    - Movement: tracking, dolly, pan (left/right), tilt (up/down), push-in, pull-out, crane, handheld, static, zoom
