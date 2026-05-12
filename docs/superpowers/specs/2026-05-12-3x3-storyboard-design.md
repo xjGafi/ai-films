@@ -68,7 +68,7 @@ Shot 7 ...
 ...
 ```
 
-**`VideoPromptConfig` change:** add optional `shotsPerRow?: number` (defaults to `SHOTS_PER_ROW = 3`). The prompt builder uses this value to insert row headers every N shots.
+The prompt builder groups shots into rows using the module-level constant `SHOTS_PER_ROW = 3`. No changes to `VideoPromptConfig`.
 
 ### Screenplay validation (Stage 0)
 
@@ -90,8 +90,7 @@ Row-level transitions within an act are no longer relevant (there is only one cl
 | `src/prompts/screenplay.ts` | Update KEY REQUIREMENTS: 9 shots, 3×3, ~1.67s/shot, 15s/act |
 | `src/pipeline/stages/2-storyboard.ts` | `GRID_COLS = 3` |
 | `src/pipeline/stages/3-prompts.ts` | `SHOTS_PER_ROW = 3`; one segment per act; pass 3 row images + char refs |
-| `src/prompts/video-shot.ts` | Emit `[Row N — Xs–Ys]` headers in SHOT SEQUENCE; use `shotsPerRow` |
-| `src/types.ts` | Add optional `shotsPerRow?: number` to `VideoPromptConfig` |
+| `src/prompts/video-shot.ts` | Emit `[Row N — Xs–Ys]` headers in SHOT SEQUENCE using `SHOTS_PER_ROW = 3` |
 
 No changes to Stage 4 (video-gen), Stage 5 (transitions), or Stage 6 (assembly).
 
