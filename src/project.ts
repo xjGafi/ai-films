@@ -18,6 +18,7 @@ import {
 
 const PROJECT_DIRS = [
   "characters",
+  "scenes",
   "storyboard",
   "clips",
   "frames",

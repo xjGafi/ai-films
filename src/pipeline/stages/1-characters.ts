@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { buildCharacterSheetPrompt } from "../../prompts/character-sheet.js";
+import { buildSceneRefPrompt } from "../../prompts/scene-ref.js";
 import { generateImage, saveBuffer } from "../../providers/volcengine.js";
-import type { Screenplay, StageResult } from "../../types.js";
+import type { Screenplay, StageResult, VideoStyle } from "../../types.js";
 import type { ProjectState } from "../state.js";
 
 /**
@@ -53,6 +54,36 @@ export async function runCharactersStage(
     }
 
     artifacts[artifactKey] = `characters/${refFileName}`;
+  }
+
+  // 4. Build lookup for user-provided scene images
+  const configSceneMap = new Map<string, string | undefined>(
+    (state.config.scenes ?? []).map((s) => [s.id, s.imagePath]),
+  );
+
+  // 5. Process each scene
+  const scenesDir = path.join(projectDir, "scenes");
+  if (!fs.existsSync(scenesDir)) fs.mkdirSync(scenesDir, { recursive: true });
+
+  for (const scene of screenplay.scenes) {
+    const refFileName = `${scene.id}-ref.png`;
+    const outPath = path.join(scenesDir, refFileName);
+    const artifactKey = `scenes/${refFileName}`;
+
+    const providedImagePath = configSceneMap.get(scene.id);
+
+    if (providedImagePath && fs.existsSync(providedImagePath)) {
+      fs.copyFileSync(providedImagePath, outPath);
+    } else {
+      const prompt = buildSceneRefPrompt(
+        scene,
+        state.config.style as VideoStyle,
+      );
+      const buffer = await generateImage(prompt, { seed: state.config.seed });
+      saveBuffer(buffer, outPath);
+    }
+
+    artifacts[artifactKey] = `scenes/${refFileName}`;
   }
 
   return { artifacts };
