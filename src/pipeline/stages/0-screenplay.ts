@@ -2,8 +2,37 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildScreenplayPrompt } from "../../prompts/screenplay.js";
 import { chat } from "../../providers/volcengine.js";
-import type { Screenplay, StageResult } from "../../types.js";
+import type { ActSpec, Screenplay, StageResult } from "../../types.js";
 import type { ProjectState } from "../state.js";
+
+const PACE_WEIGHTS: Record<string, number> = {
+  slow: 2.5,
+  medium: 1.67,
+  fast: 1.0,
+};
+const DEFAULT_PACE_WEIGHT = PACE_WEIGHTS.medium;
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function assignShotTimestamps(acts: ActSpec[]): void {
+  let cursor = 0;
+  for (const act of acts) {
+    const weights = act.shots.map(
+      (s) => PACE_WEIGHTS[s.pace ?? "medium"] ?? DEFAULT_PACE_WEIGHT,
+    );
+    const totalWeight = weights.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < act.shots.length; i++) {
+      const duration = (weights[i] / totalWeight) * act.durationTarget;
+      const start = cursor;
+      cursor += duration;
+      act.shots[i].time = `${formatTime(start)}-${formatTime(cursor)}`;
+    }
+  }
+}
 
 /**
  * Stage 0: Generate a structured screenplay via LLM.
@@ -60,6 +89,18 @@ export async function runScreenplayStage(
   if (!Array.isArray(screenplay.transitionHints)) {
     throw new Error("Screenplay must contain a transitionHints array");
   }
+
+  const actDurationSum = screenplay.acts.reduce(
+    (sum, a) => sum + a.durationTarget,
+    0,
+  );
+  if (actDurationSum !== screenplay.totalDuration) {
+    throw new Error(
+      `Act durationTargets sum to ${actDurationSum}s but totalDuration is ${screenplay.totalDuration}s`,
+    );
+  }
+
+  assignShotTimestamps(screenplay.acts);
 
   // 4. Save screenplay
   const outPath = path.join(projectDir, "screenplay.json");

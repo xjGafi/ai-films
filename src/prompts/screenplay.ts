@@ -28,14 +28,13 @@ You MUST output valid JSON matching this schema (no markdown fences, no commenta
       "shots": [
         {
           "id": number,
-          "time": string,            // "0:00-0:03" format
           "type": string,            // shot type abbreviation: ECU, CU, MCU, MS, MWS, WS, EWS, OTS, POV, Low, High, Bird, Dutch
           "camera": string,          // camera movement: "tracking", "static", "pan left", "push in", etc.
           "title": string,           // short shot label, e.g. "The Setup"
           "action": string,          // detailed action description — be specific and visual
           "emotion": string,         // e.g. "tense", "joyful", "melancholy"
           "physics": string,         // optional physics tag: "Rigid body collisions", "Fluid movement", etc.
-          "pace": string,            // "slow" | "medium" | "fast"
+          "pace": string,            // "slow" | "medium" | "fast" — controls shot duration weight
           "actionContinuous": boolean, // true if action flows directly from previous shot
           "scene": string            // scene identifier for transition logic, e.g. "desert-ext-day"
         }
@@ -52,7 +51,7 @@ You MUST output valid JSON matching this schema (no markdown fences, no commenta
 
 KEY REQUIREMENTS:
 
-1. SHOTS PER ACT: Each act MUST contain EXACTLY 9 shots — no more, no fewer. This is a hard requirement for the storyboard pipeline. The 9 shots are arranged in a 3×3 grid (3 columns, 3 rows of 3), where each row of 3 shots covers a 5-second temporal window within the 15-second video. Each shot is approximately 1.5–2 seconds long (9 shots × ~1.67s ≈ 15s per act).
+1. SHOTS PER ACT: Each act MUST contain EXACTLY 9 shots — no more, no fewer. This is a hard requirement for the storyboard pipeline (9 shots = 3×3 grid). Do NOT include a "time" field — timestamps are computed automatically from the "pace" values. Focus on shot content and pacing.
 
 2. TOTAL DURATION: The total number of acts is given in the user message — generate exactly that many acts, each with a durationTarget of 15 seconds. The sum of all act durationTargets must equal the requested total duration.
 
@@ -82,10 +81,11 @@ KEY REQUIREMENTS:
    - Emotional expressions visible on screen
    - Any relevant props or objects
 
-7. SHOT PACING: Use the pace tag to indicate the editing rhythm of each individual shot — not shot count (shot count is always 9 per act):
-   - slow: long lingering shot (~2–3s), contemplative movement, landscape, emotion
-   - medium: standard cadence (~1.5–2s), narrative scenes, dialogue
-   - fast: short sharp shot (~0.5–1s), action, impact, rapid cuts
+7. SHOT PACING: The "pace" field controls both editing rhythm AND shot duration. The pipeline uses pace to compute precise timestamps, so choose carefully:
+   - slow: long lingering shot, contemplative movement, landscape, emotion (gets more screen time)
+   - medium: standard cadence, narrative scenes, dialogue (default weight)
+   - fast: short sharp shot, action, impact, rapid cuts (gets less screen time)
+   The 9 shots' pace values together determine how the act's 15 seconds are distributed.
 
 8. CAMERA LANGUAGE: Use precise camera direction terms:
    - Movement: tracking, dolly, pan (left/right), tilt (up/down), push-in, pull-out, crane, handheld, static, zoom
@@ -121,8 +121,7 @@ TARGET DURATION: ${duration} seconds
 VISUAL STYLE: ${style}
 
 Produce the JSON screenplay now. Remember:
-- Each act MUST have EXACTLY 9 shots
-- Each shot ~1.67 seconds (9 shots × ~1.67s ≈ 15s per act)
+- Each act MUST have EXACTLY 9 shots (no "time" field — timestamps are auto-computed from pace)
 - Total number of acts: ${numActs} acts (${numActs} × 15s = ${numActs * 15}s)
 - Include transitionHints at each act boundary (after the last shot of each act except the final)
 - Character descriptions must be detailed enough for image generation prompts
