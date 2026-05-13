@@ -19,6 +19,13 @@ You MUST output valid JSON matching this schema (no markdown fences, no commenta
       "detailedDescription": string  // FULL physical description for reuse in image/video prompts
     }
   ],
+  "scenes": [
+    {
+      "id": string,              // kebab-case identifier matching shot "scene" values, e.g. "lab-int-day"
+      "name": string,            // human-readable name, e.g. "现代实验室"
+      "sceneDescription": string // detailed physical environment description (see requirement 10)
+    }
+  ],
   "acts": [
     {
       "act": number,             // 1, 2, 3 …
@@ -91,7 +98,15 @@ KEY REQUIREMENTS:
    - Movement: tracking, dolly, pan (left/right), tilt (up/down), push-in, pull-out, crane, handheld, static, zoom
    - Qualifiers: smooth, rapid, slow, gentle, violent, circling, orbiting
 
-9. SCENE IDENTIFIERS: Use consistent scene identifiers (e.g. "desert-ext-day", "cave-int-night") so the pipeline can determine transition strategies between clips.`;
+9. SCENE IDENTIFIERS: Use consistent scene identifiers (e.g. "desert-ext-day", "cave-int-night") so the pipeline can determine transition strategies between clips.
+
+10. SCENE DESCRIPTIONS: For every unique location that appears in the shots, add one entry to the "scenes" array. The "id" must exactly match the "scene" field values used in the shot objects. Each "sceneDescription" must cover:
+   - Spatial layout: room shape, size, open/enclosed feel
+   - Wall/floor/ceiling: materials, colors, textures
+   - Furniture and prop placement
+   - Lighting: direction, intensity, color temperature, mood
+   - Overall color palette
+   Be specific enough that an image generator can reproduce the exact same room twice.`;
 
 export function buildScreenplayPrompt(
   story: string,
@@ -125,7 +140,8 @@ Produce the JSON screenplay now. Remember:
 - Total number of acts: ${numActs} acts (${numActs} × 15s = ${numActs * 15}s)
 - Include transitionHints at each act boundary (after the last shot of each act except the final)
 - Character descriptions must be detailed enough for image generation prompts
-- Action descriptions must be visual and camera-oriented`;
+- Action descriptions must be visual and camera-oriented
+- Include a "scenes" array with one entry per unique location; id must match shot scene values`;
 
   return [
     { role: "system", content: SYSTEM_PROMPT },
