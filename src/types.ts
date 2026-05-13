@@ -35,6 +35,11 @@ export interface CharacterInput {
   imagePath?: string;
 }
 
+export interface SceneInput {
+  id: string;
+  imagePath?: string;
+}
+
 export interface ProjectConfig {
   story: string;
   duration: number; // 60 | 90 | 120
@@ -43,6 +48,7 @@ export interface ProjectConfig {
   resolution: "720p" | "1080p";
   aspectRatio: "16:9";
   characters: CharacterInput[];
+  scenes?: SceneInput[];
 }
 
 // ─── Project state (persisted) ───
@@ -52,6 +58,12 @@ export interface ProjectState {
   createdAt: string;
   config: ProjectConfig;
   stages: Record<StageName, StageState>;
+}
+
+export interface SceneSpec {
+  id: string; // kebab-case, e.g. "lab-int-day"
+  name: string; // human-readable, e.g. "现代实验室"
+  sceneDescription: string; // full physical environment description
 }
 
 // ─── Screenplay (output of Stage 0) ───
@@ -109,6 +121,7 @@ export interface Screenplay {
   title: string;
   totalDuration: number;
   characters: CharacterSpec[];
+  scenes: SceneSpec[];
   acts: ActSpec[];
   transitionHints: TransitionHint[];
 }
