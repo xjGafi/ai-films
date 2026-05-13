@@ -82,6 +82,25 @@ export interface ClipSpec {
   transition?: AssemblyTransition;
 }
 
+async function getVideoStreamDuration(videoPath: string): Promise<number> {
+  const { stdout } = await execFileAsync("ffprobe", [
+    "-v",
+    "error",
+    "-select_streams",
+    "v:0",
+    "-show_entries",
+    "stream=duration",
+    "-of",
+    "csv=p=0",
+    videoPath,
+  ]);
+  const parsed = parseFloat(stdout.trim());
+  if (Number.isNaN(parsed)) {
+    throw new Error(`Could not read video stream duration for ${videoPath}`);
+  }
+  return parsed;
+}
+
 export async function concatenateClips(
   clips: ClipSpec[],
   outputPath: string,
@@ -93,14 +112,19 @@ export async function concatenateClips(
     return outputPath;
   }
 
-  // Build ffmpeg xfade filter chain for crossfade transitions
+  // Probe actual video stream durations — container duration can exceed
+  // stream duration, causing xfade offsets to overshoot and silently fail.
+  const streamDurations = await Promise.all(
+    clips.map((c) => getVideoStreamDuration(c.path)),
+  );
+
   const inputs: string[] = [];
   for (const clip of clips) {
     inputs.push("-i", clip.path);
   }
 
   const filterParts: string[] = [];
-  let offset = clips[0].duration;
+  let offset = streamDurations[0];
 
   for (let i = 1; i < clips.length; i++) {
     const transition = clips[i].transition;
@@ -109,34 +133,21 @@ export async function concatenateClips(
     const nextLabel =
       i === clips.length - 1 ? "[vout]" : "[v" + (i - 1) + i + "]";
 
-    if (
+    const dur =
       transition?.strategy === "continuity_crossfade" &&
       transition.crossfadeDuration
-    ) {
-      const dur = transition.crossfadeDuration;
-      filterParts.push(
-        prevLabel +
-          "xfade=transition=fade:duration=" +
-          dur +
-          ":offset=" +
-          offset.toFixed(2) +
-          nextLabel,
-      );
-      offset += clips[i].duration - dur;
-    } else {
-      // Hard cut / occlusion — simple concat (no transition filter)
-      // Use a minimal crossfade (0.1s) for smoothness
-      const dur = 0.1;
-      filterParts.push(
-        prevLabel +
-          "xfade=transition=fade:duration=" +
-          dur +
-          ":offset=" +
-          offset.toFixed(2) +
-          nextLabel,
-      );
-      offset += clips[i].duration - dur;
-    }
+        ? transition.crossfadeDuration
+        : 0.1;
+
+    filterParts.push(
+      prevLabel +
+        "xfade=transition=fade:duration=" +
+        dur +
+        ":offset=" +
+        (offset - dur).toFixed(2) +
+        nextLabel,
+    );
+    offset += streamDurations[i] - dur;
   }
 
   const filterComplex = filterParts.join(";");
