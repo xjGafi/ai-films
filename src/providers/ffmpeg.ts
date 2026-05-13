@@ -82,6 +82,25 @@ export interface ClipSpec {
   transition?: AssemblyTransition;
 }
 
+async function hasAudioStream(videoPath: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync("ffprobe", [
+      "-v",
+      "error",
+      "-select_streams",
+      "a:0",
+      "-show_entries",
+      "stream=codec_type",
+      "-of",
+      "csv=p=0",
+      videoPath,
+    ]);
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function getVideoStreamDuration(videoPath: string): Promise<number> {
   const { stdout } = await execFileAsync("ffprobe", [
     "-v",
@@ -114,9 +133,11 @@ export async function concatenateClips(
 
   // Probe actual video stream durations — container duration can exceed
   // stream duration, causing xfade offsets to overshoot and silently fail.
-  const streamDurations = await Promise.all(
-    clips.map((c) => getVideoStreamDuration(c.path)),
-  );
+  const [streamDurations, audioPresence] = await Promise.all([
+    Promise.all(clips.map((c) => getVideoStreamDuration(c.path))),
+    Promise.all(clips.map((c) => hasAudioStream(c.path))),
+  ]);
+  const includeAudio = audioPresence.every(Boolean);
 
   const inputs: string[] = [];
   for (const clip of clips) {
@@ -124,6 +145,7 @@ export async function concatenateClips(
   }
 
   const filterParts: string[] = [];
+  const audioFilterParts: string[] = [];
   let offset = streamDurations[0];
 
   for (let i = 1; i < clips.length; i++) {
@@ -147,10 +169,25 @@ export async function concatenateClips(
         (offset - dur).toFixed(2) +
         nextLabel,
     );
+
+    if (includeAudio) {
+      const aPrevLabel =
+        i === 1 ? "[0:a][1:a]" : "[a" + (i - 2) + (i - 1) + "][" + i + ":a]";
+      const aNextLabel =
+        i === clips.length - 1 ? "[aout]" : "[a" + (i - 1) + i + "]";
+      audioFilterParts.push(
+        aPrevLabel +
+          "acrossfade=d=" +
+          dur +
+          ":curve1=exp:curve2=exp" +
+          aNextLabel,
+      );
+    }
+
     offset += streamDurations[i] - dur;
   }
 
-  const filterComplex = filterParts.join(";");
+  const filterComplex = [...filterParts, ...audioFilterParts].join(";");
 
   const cmd = [
     "-y",
@@ -159,6 +196,7 @@ export async function concatenateClips(
     filterComplex,
     "-map",
     "[vout]",
+    ...(includeAudio ? ["-map", "[aout]", "-c:a", "aac", "-b:a", "128k"] : []),
     "-c:v",
     "libx264",
     "-preset",

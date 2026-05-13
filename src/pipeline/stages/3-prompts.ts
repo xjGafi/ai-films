@@ -213,11 +213,26 @@ function assembleReferenceImages(
 ): string[] {
   const refs: string[] = [];
 
-  if (prevLastFramePath && fs.existsSync(prevLastFramePath)) {
+  // Character refs first — highest priority for cross-scene identity consistency
+  for (const char of screenplay.characters) {
+    if (refs.length >= MAX_REFERENCE_IMAGES) break;
+    const refPath = charRefMap.get(char.name);
+    if (refPath) refs.push(refPath);
+  }
+
+  if (
+    prevLastFramePath &&
+    fs.existsSync(prevLastFramePath) &&
+    refs.length < MAX_REFERENCE_IMAGES
+  ) {
     refs.push(prevLastFramePath);
   }
 
-  if (prevRow3Path && fs.existsSync(prevRow3Path)) {
+  if (
+    prevRow3Path &&
+    fs.existsSync(prevRow3Path) &&
+    refs.length < MAX_REFERENCE_IMAGES
+  ) {
     refs.push(prevRow3Path);
   }
 
@@ -232,12 +247,6 @@ function assembleReferenceImages(
   for (const rowPath of rowImagePaths) {
     if (refs.length >= MAX_REFERENCE_IMAGES) break;
     if (fs.existsSync(rowPath)) refs.push(rowPath);
-  }
-
-  for (const char of screenplay.characters) {
-    if (refs.length >= MAX_REFERENCE_IMAGES) break;
-    const refPath = charRefMap.get(char.name);
-    if (refPath) refs.push(refPath);
   }
 
   return refs;
@@ -256,9 +265,22 @@ function buildReferenceDescription(
   const parts: string[] = [];
   let imgIdx = 1;
 
+  // Characters first — highest priority so the model anchors on them for identity
+  for (const char of screenplay.characters) {
+    if (imgIdx > MAX_REFERENCE_IMAGES) break;
+    if (charRefMap.has(char.name)) {
+      parts.push(
+        `[Image${imgIdx}] is ${char.name}: ${char.detailedDescription}`,
+      );
+      imgIdx++;
+    } else {
+      parts.push(`${char.name}: ${char.detailedDescription}`);
+    }
+  }
+
   if (hasPrevLastFrame) {
     parts.push(
-      `[Image${imgIdx}] is the EXACT last frame of the previous clip. Your opening frames MUST match this image — same background, same lighting, same color palette, same character positions, same camera angle. This is the highest-priority reference.`,
+      `[Image${imgIdx}] is the EXACT last frame of the previous clip. Your opening frames MUST match this image — same background, same lighting, same color palette, same character positions, same camera angle. This is the highest-priority continuity reference.`,
     );
     imgIdx++;
   }
@@ -279,6 +301,7 @@ function buildReferenceDescription(
   }
 
   for (let rowIdx = 0; rowIdx < ROWS_PER_ACT; rowIdx++) {
+    if (imgIdx > MAX_REFERENCE_IMAGES) break;
     const rowPath = rowImagePaths[rowIdx];
     if (rowPath && fs.existsSync(rowPath)) {
       const rowNum = rowIdx + 1;
@@ -290,18 +313,6 @@ function buildReferenceDescription(
         `[Image${imgIdx}] is the storyboard row for Act ${actNum} Row ${rowNum}, showing shots ${first}–${last} (${startS}–${endS}s) — use for composition and choreography.`,
       );
       imgIdx++;
-    }
-  }
-
-  for (const char of screenplay.characters) {
-    if (imgIdx > MAX_REFERENCE_IMAGES) break;
-    if (charRefMap.has(char.name)) {
-      parts.push(
-        `[Image${imgIdx}] is ${char.name}: ${char.detailedDescription}`,
-      );
-      imgIdx++;
-    } else {
-      parts.push(`${char.name}: ${char.detailedDescription}`);
     }
   }
 

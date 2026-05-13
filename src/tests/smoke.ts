@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { submitAndPoll } from "../pipeline/stages/4-video-gen.js";
 import { ProjectState } from "../pipeline/state.js";
 import {
   cleanIntermediate,
@@ -295,6 +296,106 @@ console.log("\n=== imagePathToDataUri ===");
     );
   } finally {
     fs.unlinkSync(tmpFile);
+  }
+}
+
+// ─── Video Gen Retry Logic ───
+
+console.log("\n=== Video Gen Retry Logic ===");
+{
+  type FakeParams = Parameters<typeof submitAndPoll>[1];
+  const fakeParams = {} as FakeParams;
+  const fakeResult = {
+    url: "https://example.com/video.mp4",
+    duration: 15,
+    taskId: "task-1",
+  };
+
+  // poll network failure retries with the same taskId (no re-submit)
+  {
+    const submitted: string[] = [];
+    const polled: string[] = [];
+    let submitCall = 0;
+    let pollCall = 0;
+
+    const result = await submitAndPoll(
+      1,
+      fakeParams,
+      3,
+      async (_p) => {
+        submitted.push(`task-${++submitCall}`);
+        return submitted[submitted.length - 1];
+      },
+      async (id) => {
+        polled.push(id);
+        if (++pollCall === 1) throw new Error("fetch failed");
+        return { ...fakeResult, taskId: id };
+      },
+    );
+
+    assert(submitted.length === 1, "submit called only once on poll failure");
+    assert(polled.length === 2, "poll retried once after fetch failed");
+    assert(polled[0] === polled[1], "same taskId used for both poll attempts");
+    assert(
+      result.url === fakeResult.url,
+      "correct result returned after poll retry",
+    );
+  }
+
+  // terminal task failure does not retry poll
+  {
+    let submitCount = 0;
+    let pollCount = 0;
+    let threw = false;
+    let thrownMsg = "";
+
+    try {
+      await submitAndPoll(
+        1,
+        fakeParams,
+        3,
+        async (_p) => `task-${++submitCount}`,
+        async (_id) => {
+          pollCount++;
+          throw new Error("Video task failed: content policy");
+        },
+      );
+    } catch (err) {
+      threw = true;
+      thrownMsg = (err as Error).message;
+    }
+
+    assert(threw, "throws on terminal poll failure");
+    assert(
+      thrownMsg.startsWith("Video task failed:"),
+      "terminal error propagated unchanged",
+    );
+    assert(submitCount === 1, "submit not retried on terminal poll failure");
+    assert(pollCount === 1, "poll not retried on terminal failure");
+  }
+
+  // submit failure retries submit (not poll)
+  {
+    let submitCall = 0;
+    let pollCall = 0;
+
+    const result = await submitAndPoll(
+      1,
+      fakeParams,
+      3,
+      async (_p) => {
+        if (++submitCall < 2) throw new Error("connect ECONNREFUSED");
+        return "task-ok";
+      },
+      async (id) => {
+        pollCall++;
+        return { ...fakeResult, taskId: id };
+      },
+    );
+
+    assert(submitCall === 2, "submit retried once after failure");
+    assert(pollCall === 1, "poll called exactly once after successful submit");
+    assert(result.taskId === "task-ok", "correct taskId used for poll");
   }
 }
 

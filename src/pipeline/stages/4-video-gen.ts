@@ -3,7 +3,10 @@ import path from "node:path";
 import { VIDEO_MAX_RETRIES, VIDEO_SEGMENT_DURATION } from "../../config.js";
 import { buildSeedancePrompt } from "../../prompts/video-shot.js";
 import { extractLastFrame, getVideoDuration } from "../../providers/ffmpeg.js";
-import type { VideoTaskParams } from "../../providers/volcengine.js";
+import type {
+  VideoResult,
+  VideoTaskParams,
+} from "../../providers/volcengine.js";
 import {
   downloadFile,
   imagePathToDataUri,
@@ -26,6 +29,70 @@ function getPrimaryScene(shots: Array<{ scene?: string }>): string | undefined {
   }
   if (counts.size === 0) return undefined;
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+/**
+ * Submit a video task (retry on submit failure), then poll for the result
+ * (retry on transient network errors, reusing the same taskId).
+ * Exposed for testing — inject stub submitFn/pollFn to simulate failures.
+ */
+export async function submitAndPoll(
+  segmentId: number,
+  params: VideoTaskParams,
+  maxRetries = VIDEO_MAX_RETRIES,
+  submitFn: (p: VideoTaskParams) => Promise<string> = submitVideoTask,
+  pollFn: (id: string) => Promise<VideoResult> = pollVideoTask,
+): Promise<VideoResult> {
+  // --- Submit (retry only on submit failure) ---
+  let taskId: string | undefined;
+  let submitError: Error | undefined;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(
+        `[video-gen] segment ${segmentId}: attempt ${attempt}/${maxRetries}`,
+      );
+      taskId = await submitFn(params);
+      console.log(`[video-gen] segment ${segmentId}: taskId=${taskId}`);
+      break;
+    } catch (err) {
+      submitError = err instanceof Error ? err : new Error(String(err));
+      console.error(
+        `[video-gen] segment ${segmentId}: attempt ${attempt} failed — ${submitError.message}`,
+      );
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+  }
+  if (!taskId) {
+    throw new Error(
+      `Video submit failed for segment ${segmentId} after ${maxRetries} attempts: ${submitError?.message}`,
+    );
+  }
+
+  // --- Poll (retry transient network errors, same taskId) ---
+  let pollError: Error | undefined;
+  for (let pollAttempt = 1; pollAttempt <= maxRetries; pollAttempt++) {
+    try {
+      return await pollFn(taskId);
+    } catch (err) {
+      pollError = err instanceof Error ? err : new Error(String(err));
+      const isTerminal =
+        pollError.message.startsWith("Video task failed:") ||
+        pollError.message.includes("no URL found") ||
+        pollError.message.startsWith("Video task timed out");
+      if (isTerminal) throw pollError;
+      console.error(
+        `[video-gen] segment ${segmentId}: poll attempt ${pollAttempt} failed — ${pollError.message}`,
+      );
+      if (pollAttempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+  }
+  throw new Error(
+    `Video poll failed for segment ${segmentId} after ${maxRetries} attempts: ${pollError?.message}`,
+  );
 }
 
 export async function runVideoGenStage(
@@ -107,36 +174,8 @@ export async function runVideoGenStage(
       }
     }
 
-    // c. Generate video with retry logic
-    let lastError: Error | undefined;
-    let result: Awaited<ReturnType<typeof pollVideoTask>> | undefined;
-
-    for (let attempt = 1; attempt <= VIDEO_MAX_RETRIES; attempt++) {
-      try {
-        console.log(
-          `[video-gen] segment ${segmentId}: attempt ${attempt}/${VIDEO_MAX_RETRIES}`,
-        );
-        const taskId = await submitVideoTask(params);
-        console.log(`[video-gen] segment ${segmentId}: taskId=${taskId}`);
-        result = await pollVideoTask(taskId);
-        break;
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
-        console.error(
-          `[video-gen] segment ${segmentId}: attempt ${attempt} failed — ${lastError.message}`,
-        );
-        if (attempt < VIDEO_MAX_RETRIES) {
-          // Brief pause before retry
-          await new Promise((r) => setTimeout(r, 2000));
-        }
-      }
-    }
-
-    if (!result) {
-      throw new Error(
-        `Video generation failed for segment ${segmentId} after ${VIDEO_MAX_RETRIES} attempts: ${lastError?.message}`,
-      );
-    }
+    // c. Generate video with independent submit/poll retry
+    const result = await submitAndPoll(segmentId, params);
 
     // d. Download video
     const clipPath = path.join(clipsDir, `segment-${segmentId}.mp4`);
