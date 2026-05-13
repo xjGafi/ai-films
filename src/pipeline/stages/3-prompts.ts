@@ -54,6 +54,7 @@ export async function runPromptsStage(
   const artifacts: Record<string, string> = {};
   let segmentId = 0;
   let prevLastShot: (ShotSpec & { actNumber: number }) | undefined;
+  let prevActNum: number | undefined;
 
   for (const act of screenplay.acts) {
     segmentId++;
@@ -68,8 +69,8 @@ export async function runPromptsStage(
         : undefined;
 
     const prevRow3Path =
-      segmentId > 1
-        ? path.join(storyboardDir, `act-${act.act - 1}-row-3.png`)
+      prevActNum !== undefined
+        ? path.join(storyboardDir, `act-${prevActNum}-row-3.png`)
         : undefined;
 
     const shotsWithAct = act.shots.map((s) => ({ ...s, actNumber: act.act }));
@@ -157,6 +158,7 @@ export async function runPromptsStage(
       `prompts/segment-${segmentId}.json`;
 
     prevLastShot = shotsWithAct[shotsWithAct.length - 1];
+    prevActNum = act.act;
   }
 
   return { artifacts };
