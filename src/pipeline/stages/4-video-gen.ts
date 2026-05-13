@@ -10,8 +10,23 @@ import {
   pollVideoTask,
   submitVideoTask,
 } from "../../providers/volcengine.js";
-import type { ClipInfo, StageResult, VideoPromptConfig } from "../../types.js";
+import type {
+  ClipInfo,
+  SceneSpec,
+  Screenplay,
+  StageResult,
+  VideoPromptConfig,
+} from "../../types.js";
 import type { ProjectState } from "../state.js";
+
+function getPrimaryScene(shots: Array<{ scene?: string }>): string | undefined {
+  const counts = new Map<string, number>();
+  for (const shot of shots) {
+    if (shot.scene) counts.set(shot.scene, (counts.get(shot.scene) ?? 0) + 1);
+  }
+  if (counts.size === 0) return undefined;
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
 
 export async function runVideoGenStage(
   projectDir: string,
@@ -23,6 +38,26 @@ export async function runVideoGenStage(
 
   fs.mkdirSync(clipsDir, { recursive: true });
   fs.mkdirSync(framesDir, { recursive: true });
+
+  // Build scene ref lookup
+  const scenesDir = path.join(projectDir, "scenes");
+  const sceneRefMap = new Map<string, string>();
+  if (fs.existsSync(scenesDir)) {
+    for (const f of fs.readdirSync(scenesDir)) {
+      if (f.endsWith("-ref.png")) {
+        sceneRefMap.set(f.replace("-ref.png", ""), path.join(scenesDir, f));
+      }
+    }
+  }
+
+  const screenplayRaw = fs.readFileSync(
+    path.join(projectDir, "screenplay.json"),
+    "utf-8",
+  );
+  const screenplay: Screenplay = JSON.parse(screenplayRaw);
+  const sceneSpecMap = new Map<string, SceneSpec>(
+    (screenplay.scenes ?? []).map((s) => [s.id, s]),
+  );
 
   // 1. Read all segment prompt files and sort by ID
   const promptFiles = fs
@@ -147,11 +182,25 @@ export async function runVideoGenStage(
           `act-${currentActNumber}-row-3.png`,
         );
         const prevRow3Exists = fs.existsSync(prevRow3Path);
+        const existingRefs = nextConfig.referenceImageRefs ?? [];
         const newRefs: string[] = [lastFramePath];
         if (prevRow3Exists) {
           newRefs.push(prevRow3Path);
         }
-        const existingRefs = nextConfig.referenceImageRefs ?? [];
+
+        // Inject scene ref if Stage 3 did not already include it
+        const nextPrimaryScene = getPrimaryScene(nextConfig.shots);
+        const nextSceneRefPath = nextPrimaryScene
+          ? sceneRefMap.get(nextPrimaryScene)
+          : undefined;
+        const needsSceneRefInjection =
+          nextSceneRefPath !== undefined &&
+          fs.existsSync(nextSceneRefPath) &&
+          !existingRefs.some((r) => r === nextSceneRefPath);
+        if (needsSceneRefInjection) {
+          newRefs.push(nextSceneRefPath);
+        }
+
         nextConfig.referenceImageRefs = [...newRefs, ...existingRefs];
 
         // 2. Rebuild referenceDesc with enhanced Image1 + optional Image2, shift existing indices
@@ -166,6 +215,13 @@ export async function runVideoGenStage(
         if (prevRow3Exists) {
           descParts.push(
             `[Image2] is the storyboard strip for the ENDING of the previous act — use to maintain environment consistency (walls, furniture, lighting direction).`,
+          );
+        }
+        if (needsSceneRefInjection && nextPrimaryScene) {
+          const sceneSpec = sceneSpecMap.get(nextPrimaryScene);
+          const label = sceneSpec?.name ?? nextPrimaryScene;
+          descParts.push(
+            `[Image${descParts.length + 1}] is the reference environment for scene "${label}" — match this exact room layout, wall colors, lighting, and spatial arrangement throughout all shots.`,
           );
         }
         descParts.push(shiftedDesc);
