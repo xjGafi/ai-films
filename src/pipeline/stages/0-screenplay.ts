@@ -89,6 +89,19 @@ export async function runScreenplayStage(
   if (!Array.isArray(screenplay.transitionHints)) {
     throw new Error("Screenplay must contain a transitionHints array");
   }
+  if (!Array.isArray(screenplay.scenes) || screenplay.scenes.length === 0) {
+    throw new Error("Screenplay must contain a non-empty scenes array");
+  }
+  const sceneIds = new Set(screenplay.scenes.map((s) => s.id));
+  for (const act of screenplay.acts) {
+    for (const shot of act.shots) {
+      if (shot.scene && !sceneIds.has(shot.scene)) {
+        throw new Error(
+          `Act ${act.act} shot ${shot.id}: scene "${shot.scene}" not found in scenes array`,
+        );
+      }
+    }
+  }
 
   const actDurationSum = screenplay.acts.reduce(
     (sum, a) => sum + a.durationTarget,
