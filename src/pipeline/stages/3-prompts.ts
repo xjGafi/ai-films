@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildSeedancePrompt } from "../../prompts/video-shot.js";
 import type {
+  SceneSpec,
   Screenplay,
   ShotSpec,
   StageResult,
@@ -23,6 +24,15 @@ const ROW_DURATION = SEGMENT_DURATION / ROWS_PER_ACT; // 5s per row
  * Each act → one 15-second Seedance clip.
  * reference_images = [row-1 strip, row-2 strip, row-3 strip, ...character refs]
  */
+function getPrimaryScene(shots: ShotSpec[]): string | undefined {
+  const counts = new Map<string, number>();
+  for (const shot of shots) {
+    if (shot.scene) counts.set(shot.scene, (counts.get(shot.scene) ?? 0) + 1);
+  }
+  if (counts.size === 0) return undefined;
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
 export async function runPromptsStage(
   projectDir: string,
   state: ProjectState,
@@ -51,6 +61,20 @@ export async function runPromptsStage(
   const storyboardDir = path.join(projectDir, "storyboard");
   const framesDir = path.join(projectDir, "frames");
 
+  const scenesDir = path.join(projectDir, "scenes");
+  const sceneRefMap = new Map<string, string>();
+  if (fs.existsSync(scenesDir)) {
+    for (const f of fs.readdirSync(scenesDir)) {
+      if (f.endsWith("-ref.png")) {
+        sceneRefMap.set(f.replace("-ref.png", ""), path.join(scenesDir, f));
+      }
+    }
+  }
+
+  const sceneSpecMap = new Map<string, SceneSpec>(
+    (screenplay.scenes ?? []).map((s) => [s.id, s]),
+  );
+
   const artifacts: Record<string, string> = {};
   let segmentId = 0;
   let prevLastShot: (ShotSpec & { actNumber: number }) | undefined;
@@ -58,6 +82,14 @@ export async function runPromptsStage(
 
   for (const act of screenplay.acts) {
     segmentId++;
+
+    const primarySceneId = getPrimaryScene(act.shots);
+    const sceneRefPath = primarySceneId
+      ? sceneRefMap.get(primarySceneId)
+      : undefined;
+    const sceneName = primarySceneId
+      ? sceneSpecMap.get(primarySceneId)?.name
+      : undefined;
 
     const rowImagePaths = [1, 2, 3].map((rowNum) =>
       path.join(storyboardDir, `act-${act.act}-row-${rowNum}.png`),
@@ -88,6 +120,7 @@ export async function runPromptsStage(
       charRefMap,
       prevLastFramePath,
       prevRow3Path,
+      sceneRefPath,
     );
 
     const hasPrevLastFrame =
@@ -103,6 +136,8 @@ export async function runPromptsStage(
       charRefMap,
       hasPrevLastFrame,
       hasPrevRow3,
+      sceneRefPath,
+      sceneName,
     );
 
     const totalSegments = screenplay.acts.length;
@@ -174,6 +209,7 @@ function assembleReferenceImages(
   charRefMap: Map<string, string>,
   prevLastFramePath: string | undefined,
   prevRow3Path: string | undefined,
+  sceneRefPath: string | undefined,
 ): string[] {
   const refs: string[] = [];
 
@@ -183,6 +219,14 @@ function assembleReferenceImages(
 
   if (prevRow3Path && fs.existsSync(prevRow3Path)) {
     refs.push(prevRow3Path);
+  }
+
+  if (
+    sceneRefPath &&
+    refs.length < MAX_REFERENCE_IMAGES &&
+    fs.existsSync(sceneRefPath)
+  ) {
+    refs.push(sceneRefPath);
   }
 
   for (const rowPath of rowImagePaths) {
@@ -206,6 +250,8 @@ function buildReferenceDescription(
   charRefMap: Map<string, string>,
   hasPrevLastFrame: boolean,
   hasPrevRow3: boolean,
+  sceneRefPath: string | undefined,
+  sceneName: string | undefined,
 ): string {
   const parts: string[] = [];
   let imgIdx = 1;
@@ -220,6 +266,14 @@ function buildReferenceDescription(
   if (hasPrevRow3) {
     parts.push(
       `[Image${imgIdx}] is the storyboard strip for the ENDING of the previous act — use to maintain environment consistency (walls, furniture, lighting direction).`,
+    );
+    imgIdx++;
+  }
+
+  if (sceneRefPath && fs.existsSync(sceneRefPath)) {
+    const label = sceneName ?? "this scene";
+    parts.push(
+      `[Image${imgIdx}] is the reference environment for scene "${label}" — match this exact room layout, wall colors, lighting, and spatial arrangement throughout all shots.`,
     );
     imgIdx++;
   }
