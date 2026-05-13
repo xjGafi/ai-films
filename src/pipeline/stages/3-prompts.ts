@@ -49,6 +49,7 @@ export async function runPromptsStage(
   if (!fs.existsSync(promptsDir)) fs.mkdirSync(promptsDir, { recursive: true });
 
   const storyboardDir = path.join(projectDir, "storyboard");
+  const framesDir = path.join(projectDir, "frames");
 
   const artifacts: Record<string, string> = {};
   let segmentId = 0;
@@ -60,6 +61,11 @@ export async function runPromptsStage(
     const rowImagePaths = [1, 2, 3].map((rowNum) =>
       path.join(storyboardDir, `act-${act.act}-row-${rowNum}.png`),
     );
+
+    const prevLastFramePath =
+      segmentId > 1
+        ? path.join(framesDir, `segment-${segmentId - 1}-last.png`)
+        : undefined;
 
     const shotsWithAct = act.shots.map((s) => ({ ...s, actNumber: act.act }));
 
@@ -74,13 +80,18 @@ export async function runPromptsStage(
       rowImagePaths,
       screenplay,
       charRefMap,
+      prevLastFramePath,
     );
+
+    const hasPrevLastFrame =
+      prevLastFramePath !== undefined && fs.existsSync(prevLastFramePath);
 
     const referenceDesc = buildReferenceDescription(
       act.act,
       rowImagePaths,
       screenplay,
       charRefMap,
+      hasPrevLastFrame,
     );
 
     const totalSegments = screenplay.acts.length;
@@ -143,10 +154,16 @@ function assembleReferenceImages(
   rowImagePaths: string[],
   screenplay: Screenplay,
   charRefMap: Map<string, string>,
+  prevLastFramePath: string | undefined,
 ): string[] {
   const refs: string[] = [];
 
+  if (prevLastFramePath && fs.existsSync(prevLastFramePath)) {
+    refs.push(prevLastFramePath);
+  }
+
   for (const rowPath of rowImagePaths) {
+    if (refs.length >= MAX_REFERENCE_IMAGES) break;
     if (fs.existsSync(rowPath)) refs.push(rowPath);
   }
 
@@ -164,9 +181,17 @@ function buildReferenceDescription(
   rowImagePaths: string[],
   screenplay: Screenplay,
   charRefMap: Map<string, string>,
+  hasPrevLastFrame: boolean,
 ): string {
   const parts: string[] = [];
   let imgIdx = 1;
+
+  if (hasPrevLastFrame) {
+    parts.push(
+      `[Image${imgIdx}] is the last frame of the previous clip — use as visual anchor for seamless continuity in the opening frames.`,
+    );
+    imgIdx++;
+  }
 
   for (let rowIdx = 0; rowIdx < ROWS_PER_ACT; rowIdx++) {
     const rowPath = rowImagePaths[rowIdx];

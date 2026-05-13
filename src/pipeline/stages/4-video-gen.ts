@@ -126,7 +126,35 @@ export async function runVideoGenStage(
     const infoPath = path.join(clipsDir, `segment-${segmentId}-info.json`);
     fs.writeFileSync(infoPath, JSON.stringify(clipInfo, null, 2), "utf-8");
 
-    // h. Record artifacts
+    // h. Inject last frame into next segment's prompt for visual continuity
+    const nextPromptPath = path.join(
+      promptsDir,
+      `segment-${segmentId + 1}.json`,
+    );
+    if (fs.existsSync(nextPromptPath)) {
+      const nextConfig: VideoPromptConfig = JSON.parse(
+        fs.readFileSync(nextPromptPath, "utf-8"),
+      );
+      const alreadyHas = nextConfig.referenceImageRefs?.some((r) =>
+        r.endsWith(`segment-${segmentId}-last.png`),
+      );
+      if (!alreadyHas) {
+        const refs = nextConfig.referenceImageRefs ?? [];
+        nextConfig.referenceImageRefs = [lastFramePath, ...refs];
+        nextConfig.referenceDesc = `[Image1] is the last frame of the previous clip — use as visual anchor for seamless continuity in the opening frames.\n${nextConfig.referenceDesc.replace(/\[Image(\d+)\]/g, (_, n) => `[Image${Number(n) + 1}]`)}`;
+        const updatedPrompt = buildSeedancePrompt(nextConfig);
+        fs.writeFileSync(
+          nextPromptPath,
+          JSON.stringify({ ...nextConfig, prompt: updatedPrompt }, null, 2),
+          "utf-8",
+        );
+        console.log(
+          `[video-gen] injected last frame of segment ${segmentId} into segment ${segmentId + 1} prompts`,
+        );
+      }
+    }
+
+    // i. Record artifacts
     artifacts[`clip-${segmentId}`] = `clips/segment-${segmentId}.mp4`;
     artifacts[`frame-${segmentId}-last`] =
       `frames/segment-${segmentId}-last.png`;
