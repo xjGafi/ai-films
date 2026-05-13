@@ -10,6 +10,7 @@ import {
   DEFAULT_SEED,
   DEFAULT_STYLE,
 } from "./config.js";
+import { parseStory } from "./pipeline/parse.js";
 import { runPipeline } from "./pipeline/runner.js";
 import {
   cleanIntermediate,
@@ -18,7 +19,7 @@ import {
   listProjects,
   loadProject,
 } from "./project.js";
-import type { CharacterInput, StageName } from "./types.js";
+import type { CharacterInput, ParsedFilmConfig, StageName } from "./types.js";
 import { type ProjectConfig, STAGE_NAMES } from "./types.js";
 
 const BASE_DIR = process.cwd();
@@ -305,6 +306,78 @@ program
 
     console.log(`Cleaned intermediate files for project ${projectId}`);
     console.log("Stages from video-gen onward have been reset to pending.");
+  });
+
+// ─── parse ───
+
+program
+  .command("parse <story-file>")
+  .description("Parse a story file into a film.json config")
+  .option("--output <path>", "output path for film.json", "./film.json")
+  .option("--run", "auto-execute create + run after parsing")
+  .option("--dry-run", "print result to stdout without writing or running")
+  .action(async (storyFile: string, opts) => {
+    if (opts.run && opts.dryRun) {
+      console.error("--run and --dry-run cannot be used together");
+      process.exit(1);
+    }
+
+    const storyFilePath = path.resolve(storyFile);
+    if (!fs.existsSync(storyFilePath)) {
+      console.error(`Story file not found: ${storyFilePath}`);
+      process.exit(1);
+    }
+
+    const storyText = fs.readFileSync(storyFilePath, "utf-8");
+
+    let parsed: ParsedFilmConfig;
+    try {
+      parsed = await parseStory(storyText);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`Failed to parse story: ${message}`);
+      process.exit(1);
+    }
+
+    if (opts.dryRun) {
+      console.log(JSON.stringify(parsed, null, 2));
+      process.exit(0);
+    }
+
+    // Convert ParsedFilmConfig → ProjectConfig (drop title, map fields)
+    const config: ProjectConfig = {
+      story: parsed.story,
+      duration: parsed.duration,
+      style: parsed.style,
+      seed: parsed.seed,
+      resolution: parsed.resolution,
+      aspectRatio: parsed.aspectRatio,
+      characters: parsed.characters.map((c) => ({
+        name: c.name,
+        description: c.description,
+      })) satisfies CharacterInput[],
+      scenes: parsed.scenes.map((s) => ({ id: s.id })),
+    };
+
+    const outputPath = path.resolve(opts.output);
+    const outputDir = path.dirname(outputPath);
+    fs.mkdirSync(outputDir, { recursive: true });
+    fs.writeFileSync(outputPath, JSON.stringify(parsed, null, 2), "utf-8");
+    console.log(`Config written to ${outputPath}`);
+
+    if (opts.run) {
+      const projectDir = createProject(BASE_DIR, config);
+      const projectId = path.basename(projectDir);
+      console.log(`Project created: ${projectId}`);
+      try {
+        await runPipeline(projectDir, {});
+        console.log("Pipeline completed successfully.");
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`Pipeline failed: ${message}`);
+        process.exit(1);
+      }
+    }
   });
 
 // ─── Helpers ───

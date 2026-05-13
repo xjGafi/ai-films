@@ -37,6 +37,7 @@ export interface CharacterInput {
 
 export interface SceneInput {
   id: string;
+  description?: string;
   imagePath?: string;
 }
 
@@ -190,6 +191,20 @@ export interface AssemblyPlan {
 
 export interface StageResult {
   artifacts: Record<string, string>;
+}
+
+// ─── ParsedFilmConfig (output of parse command) ───
+
+export interface ParsedFilmConfig {
+  title: string;
+  story: string;
+  characters: { name: string; description: string }[];
+  scenes: { id: string; description: string }[];
+  duration: 60 | 90 | 120;
+  style: "cinematic" | "anime" | "3d-pixar";
+  resolution: "720p" | "1080p";
+  aspectRatio: "16:9";
+  seed: number;
 }
 
 // ─── Runner options ───
