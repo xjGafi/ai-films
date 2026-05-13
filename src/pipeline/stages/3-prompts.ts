@@ -67,6 +67,11 @@ export async function runPromptsStage(
         ? path.join(framesDir, `segment-${segmentId - 1}-last.png`)
         : undefined;
 
+    const prevRow3Path =
+      segmentId > 1
+        ? path.join(storyboardDir, `act-${act.act - 1}-row-3.png`)
+        : undefined;
+
     const shotsWithAct = act.shots.map((s) => ({ ...s, actNumber: act.act }));
 
     const transitionStrategy = determineTransitionStrategy(
@@ -81,10 +86,14 @@ export async function runPromptsStage(
       screenplay,
       charRefMap,
       prevLastFramePath,
+      prevRow3Path,
     );
 
     const hasPrevLastFrame =
       prevLastFramePath !== undefined && fs.existsSync(prevLastFramePath);
+
+    const hasPrevRow3 =
+      prevRow3Path !== undefined && fs.existsSync(prevRow3Path);
 
     const referenceDesc = buildReferenceDescription(
       act.act,
@@ -92,11 +101,17 @@ export async function runPromptsStage(
       screenplay,
       charRefMap,
       hasPrevLastFrame,
+      hasPrevRow3,
     );
 
     const totalSegments = screenplay.acts.length;
     const intent = buildIntent(act, segmentId, totalSegments);
-    const rules = buildRules(shotsWithAct, screenplay);
+    const rules = buildRules(
+      shotsWithAct,
+      screenplay,
+      segmentId,
+      hasPrevLastFrame,
+    );
     const cameraNotes = buildCameraNotes(shotsWithAct);
     const soundDesign = buildSoundDesign(shotsWithAct);
     const negatives = buildNegatives(shotsWithAct);
@@ -105,6 +120,7 @@ export async function runPromptsStage(
       shotsWithAct,
       segmentId,
       prevLastShot,
+      hasPrevLastFrame,
     );
 
     const config: VideoPromptConfig = {
@@ -155,11 +171,16 @@ function assembleReferenceImages(
   screenplay: Screenplay,
   charRefMap: Map<string, string>,
   prevLastFramePath: string | undefined,
+  prevRow3Path: string | undefined,
 ): string[] {
   const refs: string[] = [];
 
   if (prevLastFramePath && fs.existsSync(prevLastFramePath)) {
     refs.push(prevLastFramePath);
+  }
+
+  if (prevRow3Path && fs.existsSync(prevRow3Path)) {
+    refs.push(prevRow3Path);
   }
 
   for (const rowPath of rowImagePaths) {
@@ -182,13 +203,21 @@ function buildReferenceDescription(
   screenplay: Screenplay,
   charRefMap: Map<string, string>,
   hasPrevLastFrame: boolean,
+  hasPrevRow3: boolean,
 ): string {
   const parts: string[] = [];
   let imgIdx = 1;
 
   if (hasPrevLastFrame) {
     parts.push(
-      `[Image${imgIdx}] is the last frame of the previous clip — use as visual anchor for seamless continuity in the opening frames.`,
+      `[Image${imgIdx}] is the EXACT last frame of the previous clip. Your opening frames MUST match this image — same background, same lighting, same color palette, same character positions, same camera angle. This is the highest-priority reference.`,
+    );
+    imgIdx++;
+  }
+
+  if (hasPrevRow3) {
+    parts.push(
+      `[Image${imgIdx}] is the storyboard strip for the ENDING of the previous act — use to maintain environment consistency (walls, furniture, lighting direction).`,
     );
     imgIdx++;
   }
@@ -275,6 +304,8 @@ function buildIntent(
 function buildRules(
   shots: Array<ShotSpec & { actNumber: number }>,
   screenplay: Screenplay,
+  segmentId: number,
+  hasPrevLastFrame: boolean,
 ): string[] {
   const rules: string[] = [];
 
@@ -310,6 +341,12 @@ function buildRules(
   } else if (dominantPace === "slow") {
     rules.push(
       "Slow, contemplative pacing — linger on each shot, smooth camera movements, let moments breathe.",
+    );
+  }
+
+  if (segmentId > 1 && hasPrevLastFrame) {
+    rules.push(
+      `The first 2 seconds of this clip must be visually continuous with [Image1] — match the background, lighting, color temperature, and character positions exactly.`,
     );
   }
 
@@ -367,18 +404,42 @@ function buildContinuityNote(
   shots: Array<ShotSpec & { actNumber: number }>,
   segmentId: number,
   prevLastShot: (ShotSpec & { actNumber: number }) | undefined,
+  hasPrevLastFrame: boolean,
 ): string | undefined {
   if (segmentId === 1 || !prevLastShot) return undefined;
-
-  const parts = [
-    `This clip must feel like a direct continuation of the previous clip.`,
-    `Start with: ${prevLastShot.action}`,
-  ];
 
   const sameScene =
     shots[0]?.scene &&
     prevLastShot.scene &&
     shots[0].scene === prevLastShot.scene;
+
+  if (hasPrevLastFrame && sameScene) {
+    return [
+      "VISUAL CONTINUITY — SAME SCENE:",
+      "[Image1] shows exactly where the previous clip ended. Your opening frames must match:",
+      "• Background: identical walls, furniture, objects, spatial layout",
+      "• Lighting: same direction, intensity, and color temperature",
+      "• Camera: same angle and distance from subjects",
+      "• Characters: same positions and poses as shown in [Image1]",
+      `Action continues from: ${prevLastShot.action}`,
+    ].join("\n");
+  }
+
+  if (hasPrevLastFrame && !sameScene) {
+    return [
+      "VISUAL CONTINUITY — SCENE TRANSITION:",
+      "[Image1] shows the previous clip's ending. Transition smoothly to the new scene while:",
+      "• Maintaining consistent character appearance and costume",
+      "• Using a natural transition (the character walks/turns to reveal the new environment)",
+      `Action continues from: ${prevLastShot.action}`,
+    ].join("\n");
+  }
+
+  // Fallback: no last frame available (first pipeline run, stage 3 pass)
+  const parts = [
+    "This clip must feel like a direct continuation of the previous clip.",
+    `Start with: ${prevLastShot.action}`,
+  ];
   if (sameScene) {
     parts.push(
       "Maintain the same scene, same lighting, same camera distance, and same emotional tone.",
@@ -388,6 +449,5 @@ function buildContinuityNote(
       "Transition smoothly to the new scene while maintaining character appearance.",
     );
   }
-
   return parts.join(" ");
 }
