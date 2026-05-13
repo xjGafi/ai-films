@@ -126,7 +126,7 @@ export async function runVideoGenStage(
     const infoPath = path.join(clipsDir, `segment-${segmentId}-info.json`);
     fs.writeFileSync(infoPath, JSON.stringify(clipInfo, null, 2), "utf-8");
 
-    // h. Inject last frame into next segment's prompt for visual continuity
+    // h. Inject last frame + enhanced continuity into next segment's prompt
     const nextPromptPath = path.join(
       promptsDir,
       `segment-${segmentId + 1}.json`,
@@ -139,9 +139,73 @@ export async function runVideoGenStage(
         r.endsWith(`segment-${segmentId}-last.png`),
       );
       if (!alreadyHas) {
-        const refs = nextConfig.referenceImageRefs ?? [];
-        nextConfig.referenceImageRefs = [lastFramePath, ...refs];
-        nextConfig.referenceDesc = `[Image1] is the last frame of the previous clip — use as visual anchor for seamless continuity in the opening frames.\n${nextConfig.referenceDesc.replace(/\[Image(\d+)\]/g, (_, n) => `[Image${Number(n) + 1}]`)}`;
+        // 1. Prepend last frame + prev row-3 to referenceImageRefs
+        const storyboardDir = path.join(projectDir, "storyboard");
+        const currentActNumber = segmentId; // acts and segments are 1:1
+        const prevRow3Path = path.join(
+          storyboardDir,
+          `act-${currentActNumber}-row-3.png`,
+        );
+        const prevRow3Exists = fs.existsSync(prevRow3Path);
+        const newRefs: string[] = [lastFramePath];
+        if (prevRow3Exists) {
+          newRefs.push(prevRow3Path);
+        }
+        const existingRefs = nextConfig.referenceImageRefs ?? [];
+        nextConfig.referenceImageRefs = [...newRefs, ...existingRefs];
+
+        // 2. Rebuild referenceDesc with enhanced Image1 + optional Image2, shift existing indices
+        const shiftCount = newRefs.length;
+        const shiftedDesc = nextConfig.referenceDesc.replace(
+          /\[Image(\d+)\]/g,
+          (_, n) => `[Image${Number(n) + shiftCount}]`,
+        );
+        const descParts: string[] = [
+          `[Image1] is the EXACT last frame of the previous clip. Your opening frames MUST match this image — same background, same lighting, same color palette, same character positions, same camera angle. This is the highest-priority reference.`,
+        ];
+        if (prevRow3Exists) {
+          descParts.push(
+            `[Image2] is the storyboard strip for the ENDING of the previous act — use to maintain environment consistency (walls, furniture, lighting direction).`,
+          );
+        }
+        descParts.push(shiftedDesc);
+        nextConfig.referenceDesc = descParts.join("\n");
+
+        // 3. Replace continuityNote with enhanced scene-aware version
+        const currentLastShot = config.shots[config.shots.length - 1];
+        const nextFirstShot = nextConfig.shots[0];
+        const sameScene =
+          currentLastShot?.scene &&
+          nextFirstShot?.scene &&
+          currentLastShot.scene === nextFirstShot.scene;
+        if (sameScene) {
+          nextConfig.continuityNote = [
+            "VISUAL CONTINUITY — SAME SCENE:",
+            "[Image1] shows exactly where the previous clip ended. Your opening frames must match:",
+            "• Background: identical walls, furniture, objects, spatial layout",
+            "• Lighting: same direction, intensity, and color temperature",
+            "• Camera: same angle and distance from subjects",
+            "• Characters: same positions and poses as shown in [Image1]",
+            `Action continues from: ${currentLastShot.action}`,
+          ].join("\n");
+        } else {
+          nextConfig.continuityNote = [
+            "VISUAL CONTINUITY — SCENE TRANSITION:",
+            "[Image1] shows the previous clip's ending. Transition smoothly to the new scene while:",
+            "• Maintaining consistent character appearance and costume",
+            "• Using a natural transition (the character walks/turns to reveal the new environment)",
+            `Action continues from: ${currentLastShot?.action ?? "the previous scene"}`,
+          ].join("\n");
+        }
+
+        // 4. Append hard continuity rule if not already present
+        const continuityRule =
+          "The first 2 seconds of this clip must be visually continuous with [Image1] — match the background, lighting, color temperature, and character positions exactly.";
+        if (!nextConfig.rules.includes(continuityRule)) {
+          nextConfig.rules.push(continuityRule);
+        }
+
+        // 5. Rebuild prompt and save
         const updatedPrompt = buildSeedancePrompt(nextConfig);
         fs.writeFileSync(
           nextPromptPath,
@@ -149,7 +213,7 @@ export async function runVideoGenStage(
           "utf-8",
         );
         console.log(
-          `[video-gen] injected last frame of segment ${segmentId} into segment ${segmentId + 1} prompts`,
+          `[video-gen] injected last frame + continuity layers of segment ${segmentId} into segment ${segmentId + 1} prompts`,
         );
       }
     }
