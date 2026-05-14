@@ -43,3 +43,6 @@ coverage/
 
 # sharp native addon cache
 node_modules/sharp/vendor/
+
+# playwright
+.playwright-mcp/
