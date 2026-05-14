@@ -35,7 +35,7 @@ export function buildStoryboardPrompt(
 
   // Build character reference block
   const characterBlock = characters
-    .map((c) => `- ${c.name}: ${c.detailedDescription}`)
+    .map((c) => `- ${c.name}: ${c.detail}`)
     .join("\n");
 
   // Build continuity block for previous act's last shot

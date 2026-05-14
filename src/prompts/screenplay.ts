@@ -1,4 +1,4 @@
-import type { CharacterInput } from "../types.js";
+import type { CharacterInput, SceneInput } from "../types.js";
 
 /**
  * Build the LLM message array for structured screenplay generation.
@@ -14,16 +14,17 @@ You MUST output valid JSON matching this schema (no markdown fences, no commenta
   "totalDuration": number,
   "characters": [
     {
-      "id": string,          // e.g. "A", "B"
+      "id": string,   // e.g. "A", "B" — reuse directly from input, do NOT generate new ids
       "name": string,
-      "detailedDescription": string  // FULL physical description for reuse in image/video prompts
+      "detail": string  // FULL physical description for reuse in image/video prompts
     }
   ],
   "scenes": [
     {
-      "id": string,              // kebab-case identifier matching shot "scene" values, e.g. "lab-int-day"
-      "name": string,            // human-readable name, e.g. "现代实验室"
-      "sceneDescription": string // detailed physical environment description (see requirement 10)
+      "id": string,          // letter identifier — must exactly match the FIXED SCENES ids if provided
+      "name": string,        // short readable name
+      "description": string, // brief description
+      "detail": string       // detailed physical environment description (see requirement 10)
     }
   ],
   "acts": [
@@ -43,7 +44,7 @@ You MUST output valid JSON matching this schema (no markdown fences, no commenta
           "physics": string,         // optional physics tag: "Rigid body collisions", "Fluid movement", etc.
           "pace": string,            // "slow" | "medium" | "fast" — controls shot duration weight
           "actionContinuous": boolean, // true if action flows directly from previous shot
-          "scene": string            // scene identifier for transition logic, e.g. "desert-ext-day"
+          "scene": string            // scene id (letter) for transition logic, e.g. "A", "B"
         }
       ]
     }
@@ -74,7 +75,7 @@ KEY REQUIREMENTS:
    OTS (Over-the-Shoulder), POV (Point of View),
    Low (Low Angle), High (High Angle), Bird (Bird's Eye), Dutch (Dutch Angle)
 
-5. CHARACTER DESCRIPTIONS: Each character MUST have a "detailedDescription" field containing a complete, precise physical description suitable for reuse in image and video generation prompts. Include:
+5. CHARACTER DESCRIPTIONS: Each character MUST have a "detail" field containing a complete, precise physical description suitable for reuse in image and video generation prompts. Include:
    - Age, body type, height impression
    - Hair: color, style, length, texture (use precise color words like "charcoal grey", not "dark")
    - Face: shape, distinctive features, expression style
@@ -98,9 +99,9 @@ KEY REQUIREMENTS:
    - Movement: tracking, dolly, pan (left/right), tilt (up/down), push-in, pull-out, crane, handheld, static, zoom
    - Qualifiers: smooth, rapid, slow, gentle, violent, circling, orbiting
 
-9. SCENE IDENTIFIERS: Use consistent scene identifiers (e.g. "desert-ext-day", "cave-int-night") so the pipeline can determine transition strategies between clips.
+9. SCENE IDENTIFIERS: Use letter ids (A, B, C…) as scene identifiers so the pipeline can determine transition strategies between clips. If FIXED SCENES are provided, use their exact ids.
 
-10. SCENE DESCRIPTIONS: For every unique location that appears in the shots, add one entry to the "scenes" array. The "id" must exactly match the "scene" field values used in the shot objects. Each "sceneDescription" must cover:
+10. SCENE DESCRIPTIONS: For every unique location that appears in the shots, add one entry to the "scenes" array. The "id" must be a letter (A, B, …) matching the FIXED SCENES ids if provided, and must exactly match the "scene" field values used in the shot objects. Each "detail" must cover:
    - Spatial layout: room shape, size, open/enclosed feel
    - Wall/floor/ceiling: materials, colors, textures
    - Furniture and prop placement
@@ -116,7 +117,7 @@ CRITICAL: Never use ASCII double-quote characters ( " ) inside any JSON string v
 
 13. PACE VARIATION: Each act MUST use at least 2 different pace values out of "slow", "medium", "fast". A uniform pace across all 9 shots kills rhythm. Build tension with fast cuts, release it with slow beats. Think in editing patterns: fast-fast-slow, medium-fast-medium, etc.
 
-14. CHARACTER DESCRIPTIONS — NO SCENE PROPS: The "detailedDescription" field describes the character's permanent physical appearance only — body, face, hair, clothing, accessories they always wear. Do NOT include scene-specific props (food, drinks, weapons picked up during the story, etc.) as these will contaminate the character reference sheet. Props belong in shot "action" descriptions, not in character definitions.
+14. CHARACTER DESCRIPTIONS — NO SCENE PROPS: The "detail" field describes the character's permanent physical appearance only — body, face, hair, clothing, accessories they always wear. Do NOT include scene-specific props (food, drinks, weapons picked up during the story, etc.) as these will contaminate the character reference sheet. Props belong in shot "action" descriptions, not in character definitions.
 
 15. CHARACTER DESCRIPTIONS — NO TEMPLATE LANGUAGE: Avoid generic, cliché appearance phrases like "五官精致" (delicate features), "眼神锐利" (sharp eyes), "鼻梁高挺" (high nose bridge). These are too vague for image generation. Instead, describe specific, distinctive visual traits: unusual color combinations, asymmetric features, visible textures, material contrasts on clothing, signature silhouette shapes. Each character should be visually distinguishable from any other character based on the description alone.`;
 
@@ -125,19 +126,31 @@ export function buildScreenplayPrompt(
   characters: CharacterInput[],
   duration: number,
   style: string,
+  scenes?: SceneInput[],
 ): Array<{ role: "system" | "user"; content: string }> {
   const characterList = characters
     .map((c) => {
       let line = `- ${c.name}`;
+      if (c.detail)
+        line += `\n  FIXED DESCRIPTION (use EXACTLY as-is in output, do not modify): ${c.detail}`;
       if (c.imagePath) line += ` (has reference image)`;
-      if (c.detailedDescription) {
-        line += `\n  FIXED DESCRIPTION (use EXACTLY as-is in output, do not modify): ${c.detailedDescription}`;
-      }
       return line;
     })
     .join("\n");
 
   const numActs = Math.ceil(duration / 15);
+
+  let fixedScenesBlock = "";
+  if (scenes && scenes.length > 0) {
+    const sceneLines = scenes
+      .map((s) => {
+        const name = (s as { name?: string }).name ?? "";
+        const detail = (s as { detail?: string }).detail ?? s.description ?? "";
+        return `- [id: ${s.id}]${name ? ` [name: ${name}]` : ""} detail: ${detail}`;
+      })
+      .join("\n");
+    fixedScenesBlock = `\nFIXED SCENES (use EXACTLY as-is — same id, same name, same detail — do not rename or rewrite):\n${sceneLines}\n\nAll shot "scene" fields must reference one of these exact ids (${scenes.map((s) => s.id).join(", ")}).\n`;
+  }
 
   const userPrompt = `Generate a complete structured screenplay for the following film:
 
@@ -146,7 +159,7 @@ ${story}
 
 CHARACTERS:
 ${characterList}
-
+${fixedScenesBlock}
 TARGET DURATION: ${duration} seconds
 VISUAL STYLE: ${style}
 
@@ -157,7 +170,8 @@ Produce the JSON screenplay now. Remember:
 - Character descriptions must be detailed enough for image generation prompts
 - If a character already has a FIXED DESCRIPTION, copy it verbatim into detailedDescription — do not paraphrase or regenerate
 - Action descriptions must be visual and camera-oriented
-- Include a "scenes" array with one entry per unique location; id must match shot scene values`;
+- Include a "scenes" array with one entry per unique location; id must be a letter (A, B, …) matching shot scene values
+- If FIXED SCENES are provided, use their exact ids in both the "scenes" array and all shot "scene" fields`;
 
   return [
     { role: "system", content: SYSTEM_PROMPT },

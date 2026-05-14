@@ -17,7 +17,7 @@ export function buildSceneRefPrompt(
 
   return `Empty environment reference image.
 
-${scene.sceneDescription}
+${scene.detail}
 
 REQUIREMENTS:
 - No people, no characters, no figures of any kind.

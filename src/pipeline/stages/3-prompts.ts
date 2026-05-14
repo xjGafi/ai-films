@@ -230,7 +230,7 @@ function buildReferenceDescription(
   // Characters first — highest priority so the model anchors on them for identity
   for (const char of screenplay.characters) {
     if (imgIdx > MAX_REFERENCE_IMAGES) break;
-    const desc = char.detailedDescription;
+    const desc = char.detail;
     if (charRefMap.has(char.name)) {
       parts.push(`[Image${imgIdx}] is ${char.name}: ${desc}`);
       imgIdx++;

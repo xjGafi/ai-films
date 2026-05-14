@@ -30,17 +30,19 @@ export interface StageState {
 export type VideoStyle = "cinematic" | "anime" | "3d-pixar";
 
 export interface CharacterInput {
+  id: string; // 字母标识符，如 "A", "B"
   name: string;
   description?: string;
   imagePath?: string;
-  detailedDescription?: string;
+  detail?: string; // 英文精确视觉描述，用于图像/视频生成提示词
 }
 
 export interface SceneInput {
-  id: string;
+  id: string; // 字母标识符，如 "A", "B"
+  name: string; // 简短可读名，如 "落日社区公园"
   description?: string;
   imagePath?: string;
-  sceneDescription?: string;
+  detail?: string; // 英文精确空间描述，用于图像/视频生成提示词
 }
 
 export interface ProjectConfig {
@@ -64,9 +66,10 @@ export interface ProjectState {
 }
 
 export interface SceneSpec {
-  id: string; // kebab-case, e.g. "lab-int-day"
-  name: string; // human-readable, e.g. "现代实验室"
-  sceneDescription: string; // full physical environment description
+  id: string; // 字母标识符
+  name: string; // 简短可读名
+  description?: string;
+  detail: string;
 }
 
 // ─── Screenplay (output of Stage 0) ───
@@ -104,7 +107,8 @@ export interface ShotSpec {
 export interface CharacterSpec {
   id: string;
   name: string;
-  detailedDescription: string; // full physical description for prompts
+  description?: string;
+  detail: string;
 }
 
 export interface ActSpec {
@@ -201,11 +205,12 @@ export interface ParsedFilmConfig {
   title: string;
   story: string;
   characters: {
+    id: string;
     name: string;
     description: string;
-    detailedDescription: string;
+    detail: string;
   }[];
-  scenes: { id: string; description: string; sceneDescription: string }[];
+  scenes: { id: string; name: string; description: string; detail: string }[];
   duration: 60 | 90 | 120;
   style: "cinematic" | "anime" | "3d-pixar";
   resolution: "720p" | "1080p";

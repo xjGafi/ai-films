@@ -104,14 +104,16 @@ export async function parseStory(storyText: string): Promise<ParsedFilmConfig> {
     title: parsed.title,
     story: parsed.story,
     characters: parsed.characters as {
+      id: string;
       name: string;
       description: string;
-      detailedDescription: string;
+      detail: string;
     }[],
     scenes: parsed.scenes as {
       id: string;
+      name: string;
       description: string;
-      sceneDescription: string;
+      detail: string;
     }[],
     duration,
     style: rawStyle as "cinematic" | "anime" | "3d-pixar",

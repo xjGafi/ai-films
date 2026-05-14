@@ -44,10 +44,16 @@ export async function runScreenplayStage(
   projectDir: string,
   state: ProjectState,
 ): Promise<StageResult> {
-  const { story, characters, duration, style } = state.config;
+  const { story, characters, duration, style, scenes } = state.config;
 
   // 1. Build prompt messages
-  const messages = buildScreenplayPrompt(story, characters, duration, style);
+  const messages = buildScreenplayPrompt(
+    story,
+    characters,
+    duration,
+    style,
+    scenes,
+  );
 
   // 2. Call LLM with JSON output mode
   // numActs × 9 shots each; screenplay JSON can exceed 8k tokens
@@ -120,27 +126,30 @@ export async function runScreenplayStage(
 
   assignShotTimestamps(screenplay.acts);
 
-  // Force-override character descriptions with pre-generated English descriptions from config
+  // 5. Force-override character and scene fields from config inputs
+  //    Ensures LLM output doesn't drift from the canonical input descriptions/ids.
   const charInputMap = new Map(state.config.characters.map((c) => [c.name, c]));
   for (const charSpec of screenplay.characters) {
     const inputChar = charInputMap.get(charSpec.name);
-    if (inputChar?.detailedDescription) {
-      charSpec.detailedDescription = inputChar.detailedDescription;
+    if (inputChar?.detail) {
+      charSpec.detail = inputChar.detail;
+    }
+    if (inputChar?.id) {
+      charSpec.id = inputChar.id;
     }
   }
 
-  // Force-override scene descriptions with pre-generated English descriptions from config
   const sceneInputMap = new Map(
     (state.config.scenes ?? []).map((s) => [s.id, s]),
   );
   for (const sceneSpec of screenplay.scenes) {
     const inputScene = sceneInputMap.get(sceneSpec.id);
-    if (inputScene?.sceneDescription) {
-      sceneSpec.sceneDescription = inputScene.sceneDescription;
+    if (inputScene?.detail) {
+      sceneSpec.detail = inputScene.detail;
     }
   }
 
-  // 4. Save screenplay
+  // 6. Save screenplay
   const outPath = path.join(projectDir, "screenplay.json");
   const dir = path.dirname(outPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
