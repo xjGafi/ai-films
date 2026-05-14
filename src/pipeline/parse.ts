@@ -18,13 +18,17 @@ export async function parseStory(storyText: string): Promise<ParsedFilmConfig> {
   const messages = buildParseStoryPrompt(storyText);
 
   const raw = await chat(messages, {
-    responseFormat: { type: "json_object" },
     maxTokens: 4096,
   });
 
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(cleaned);
   } catch (err) {
     throw new Error(
       `Failed to parse story config JSON: ${err instanceof Error ? err.message : String(err)}`,

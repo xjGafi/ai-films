@@ -49,10 +49,15 @@ async function translateCharacterDescriptions(
         content: `Translate the following character appearance descriptions to English for use in a video generation prompt. Use precise, specific visual vocabulary: exact color names (e.g. "charcoal grey" not "dark grey"), specific material names (e.g. "cotton crew-neck T-shirt"), concrete physical descriptors (e.g. "deeply receding hairline" not "sparse hair"). Focus only on visual appearance — no personality, backstory, or abstract traits. Return JSON: { "translations": [{ "name": "...", "description": "..." }] }\n\n${list}`,
       },
     ],
-    { responseFormat: { type: "json_object" }, temperature: 0.2 },
+    { temperature: 0.2 },
   );
 
-  const parsed = JSON.parse(result) as {
+  const cleaned = result
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+
+  const parsed = JSON.parse(cleaned) as {
     translations: { name: string; description: string }[];
   };
   const map = new Map<string, string>();
