@@ -213,19 +213,9 @@ export async function runVideoGenStage(
         r.endsWith(`segment-${segmentId}-last.png`),
       );
       if (!alreadyHas) {
-        // 1. Prepend last frame + prev row-3 to referenceImageRefs
-        const storyboardDir = path.join(projectDir, "storyboard");
-        const currentActNumber = segmentId; // acts and segments are 1:1
-        const prevRow3Path = path.join(
-          storyboardDir,
-          `act-${currentActNumber}-row-3.png`,
-        );
-        const prevRow3Exists = fs.existsSync(prevRow3Path);
+        // 1. Prepend last frame to referenceImageRefs
         const existingRefs = nextConfig.referenceImageRefs ?? [];
         const newRefs: string[] = [lastFramePath];
-        if (prevRow3Exists) {
-          newRefs.push(prevRow3Path);
-        }
 
         // Inject scene ref if Stage 3 did not already include it
         const nextPrimaryScene = getPrimaryScene(nextConfig.shots);
@@ -251,11 +241,6 @@ export async function runVideoGenStage(
         const descParts: string[] = [
           `[Image1] is the EXACT last frame of the previous clip. Your opening frames MUST match this image — same background, same lighting, same color palette, same character positions, same camera angle. This is the highest-priority reference.`,
         ];
-        if (prevRow3Exists) {
-          descParts.push(
-            `[Image2] is the storyboard strip for the ENDING of the previous act — use to maintain environment consistency (walls, furniture, lighting direction).`,
-          );
-        }
         if (needsSceneRefInjection && nextPrimaryScene) {
           const sceneSpec = sceneSpecMap.get(nextPrimaryScene);
           const label = sceneSpec?.name ?? nextPrimaryScene;
