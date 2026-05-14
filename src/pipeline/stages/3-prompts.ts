@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { buildSeedancePrompt } from "../../prompts/video-shot.js";
+import { chat } from "../../providers/volcengine.js";
 import type {
+  CharacterSpec,
   SceneSpec,
   Screenplay,
   ShotSpec,
@@ -33,6 +35,33 @@ function getPrimaryScene(shots: ShotSpec[]): string | undefined {
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
 }
 
+async function translateCharacterDescriptions(
+  characters: CharacterSpec[],
+): Promise<Map<string, string>> {
+  const list = characters
+    .map((c, i) => `${i + 1}. ${c.name}: ${c.detailedDescription}`)
+    .join("\n\n");
+
+  const result = await chat(
+    [
+      {
+        role: "user",
+        content: `Translate the following character appearance descriptions to English for use in a video generation prompt. Use precise, specific visual vocabulary: exact color names (e.g. "charcoal grey" not "dark grey"), specific material names (e.g. "cotton crew-neck T-shirt"), concrete physical descriptors (e.g. "deeply receding hairline" not "sparse hair"). Focus only on visual appearance — no personality, backstory, or abstract traits. Return JSON: { "translations": [{ "name": "...", "description": "..." }] }\n\n${list}`,
+      },
+    ],
+    { responseFormat: { type: "json_object" }, temperature: 0.2 },
+  );
+
+  const parsed = JSON.parse(result) as {
+    translations: { name: string; description: string }[];
+  };
+  const map = new Map<string, string>();
+  for (const item of parsed.translations) {
+    if (item.name && item.description) map.set(item.name, item.description);
+  }
+  return map;
+}
+
 export async function runPromptsStage(
   projectDir: string,
   state: ProjectState,
@@ -58,7 +87,6 @@ export async function runPromptsStage(
   const promptsDir = path.join(projectDir, "prompts");
   if (!fs.existsSync(promptsDir)) fs.mkdirSync(promptsDir, { recursive: true });
 
-  const storyboardDir = path.join(projectDir, "storyboard");
   const framesDir = path.join(projectDir, "frames");
 
   const scenesDir = path.join(projectDir, "scenes");
@@ -75,10 +103,13 @@ export async function runPromptsStage(
     (screenplay.scenes ?? []).map((s) => [s.id, s]),
   );
 
+  const charDescEnMap = await translateCharacterDescriptions(
+    screenplay.characters,
+  );
+
   const artifacts: Record<string, string> = {};
   let segmentId = 0;
   let prevLastShot: (ShotSpec & { actNumber: number }) | undefined;
-  let prevActNum: number | undefined;
 
   for (const act of screenplay.acts) {
     segmentId++;
@@ -91,18 +122,9 @@ export async function runPromptsStage(
       ? sceneSpecMap.get(primarySceneId)?.name
       : undefined;
 
-    const rowImagePaths = [1, 2, 3].map((rowNum) =>
-      path.join(storyboardDir, `act-${act.act}-row-${rowNum}.png`),
-    );
-
     const prevLastFramePath =
       segmentId > 1
         ? path.join(framesDir, `segment-${segmentId - 1}-last.png`)
-        : undefined;
-
-    const prevRow3Path =
-      prevActNum !== undefined
-        ? path.join(storyboardDir, `act-${prevActNum}-row-3.png`)
         : undefined;
 
     const shotsWithAct = act.shots.map((s) => ({ ...s, actNumber: act.act }));
@@ -115,27 +137,20 @@ export async function runPromptsStage(
     );
 
     const referenceImageRefs = assembleReferenceImages(
-      rowImagePaths,
       screenplay,
       charRefMap,
       prevLastFramePath,
-      prevRow3Path,
       sceneRefPath,
     );
 
     const hasPrevLastFrame =
       prevLastFramePath !== undefined && fs.existsSync(prevLastFramePath);
 
-    const hasPrevRow3 =
-      prevRow3Path !== undefined && fs.existsSync(prevRow3Path);
-
     const referenceDesc = buildReferenceDescription(
-      act.act,
-      rowImagePaths,
       screenplay,
       charRefMap,
+      charDescEnMap,
       hasPrevLastFrame,
-      hasPrevRow3,
       sceneRefPath,
       sceneName,
     );
@@ -193,7 +208,6 @@ export async function runPromptsStage(
       `prompts/segment-${segmentId}.json`;
 
     prevLastShot = shotsWithAct[shotsWithAct.length - 1];
-    prevActNum = act.act;
   }
 
   return { artifacts };
@@ -204,11 +218,9 @@ export async function runPromptsStage(
 const MAX_REFERENCE_IMAGES = 9;
 
 function assembleReferenceImages(
-  rowImagePaths: string[],
   screenplay: Screenplay,
   charRefMap: Map<string, string>,
   prevLastFramePath: string | undefined,
-  prevRow3Path: string | undefined,
   sceneRefPath: string | undefined,
 ): string[] {
   const refs: string[] = [];
@@ -229,14 +241,6 @@ function assembleReferenceImages(
   }
 
   if (
-    prevRow3Path &&
-    fs.existsSync(prevRow3Path) &&
-    refs.length < MAX_REFERENCE_IMAGES
-  ) {
-    refs.push(prevRow3Path);
-  }
-
-  if (
     sceneRefPath &&
     refs.length < MAX_REFERENCE_IMAGES &&
     fs.existsSync(sceneRefPath)
@@ -244,21 +248,14 @@ function assembleReferenceImages(
     refs.push(sceneRefPath);
   }
 
-  for (const rowPath of rowImagePaths) {
-    if (refs.length >= MAX_REFERENCE_IMAGES) break;
-    if (fs.existsSync(rowPath)) refs.push(rowPath);
-  }
-
   return refs;
 }
 
 function buildReferenceDescription(
-  actNum: number,
-  rowImagePaths: string[],
   screenplay: Screenplay,
   charRefMap: Map<string, string>,
+  charDescEnMap: Map<string, string>,
   hasPrevLastFrame: boolean,
-  hasPrevRow3: boolean,
   sceneRefPath: string | undefined,
   sceneName: string | undefined,
 ): string {
@@ -268,13 +265,12 @@ function buildReferenceDescription(
   // Characters first — highest priority so the model anchors on them for identity
   for (const char of screenplay.characters) {
     if (imgIdx > MAX_REFERENCE_IMAGES) break;
+    const desc = charDescEnMap.get(char.name) ?? char.detailedDescription;
     if (charRefMap.has(char.name)) {
-      parts.push(
-        `[Image${imgIdx}] is ${char.name}: ${char.detailedDescription}`,
-      );
+      parts.push(`[Image${imgIdx}] is ${char.name}: ${desc}`);
       imgIdx++;
     } else {
-      parts.push(`${char.name}: ${char.detailedDescription}`);
+      parts.push(`${char.name}: ${desc}`);
     }
   }
 
@@ -285,35 +281,12 @@ function buildReferenceDescription(
     imgIdx++;
   }
 
-  if (hasPrevRow3) {
-    parts.push(
-      `[Image${imgIdx}] is the storyboard strip for the ENDING of the previous act — use to maintain environment consistency (walls, furniture, lighting direction).`,
-    );
-    imgIdx++;
-  }
-
   if (sceneRefPath && fs.existsSync(sceneRefPath)) {
     const label = sceneName ?? "this scene";
     parts.push(
       `[Image${imgIdx}] is the reference environment for scene "${label}" — match this exact room layout, wall colors, lighting, and spatial arrangement throughout all shots.`,
     );
     imgIdx++;
-  }
-
-  for (let rowIdx = 0; rowIdx < ROWS_PER_ACT; rowIdx++) {
-    if (imgIdx > MAX_REFERENCE_IMAGES) break;
-    const rowPath = rowImagePaths[rowIdx];
-    if (rowPath && fs.existsSync(rowPath)) {
-      const rowNum = rowIdx + 1;
-      const startS = rowIdx * ROW_DURATION;
-      const endS = (rowIdx + 1) * ROW_DURATION;
-      const first = rowIdx * SHOTS_PER_ROW + 1;
-      const last = (rowIdx + 1) * SHOTS_PER_ROW;
-      parts.push(
-        `[Image${imgIdx}] is the storyboard row for Act ${actNum} Row ${rowNum}, showing shots ${first}–${last} (${startS}–${endS}s) — use for composition and choreography.`,
-      );
-      imgIdx++;
-    }
   }
 
   return parts.join("\n");
