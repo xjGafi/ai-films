@@ -108,6 +108,8 @@ KEY REQUIREMENTS:
    - Overall color palette
    Be specific enough that an image generator can reproduce the exact same room twice.
 
+CRITICAL: Never use ASCII double-quote characters ( " ) inside any JSON string value — they will break JSON parsing. Use Chinese quotation marks (「」or 『』) or single quotes (') inside string values instead.
+
 11. NO FILLER SHOTS: Never pad an act with empty visual beats such as fade-to-black, title cards, "screen goes dark", or repeated pull-out/zoom-out sequences. Every shot must contain meaningful narrative action or character performance. If the story's remaining content does not fill 9 shots, invent additional character reactions, environmental details, or visual metaphors that enrich the scene — do not resort to "the screen fades" or "the film ends".
 
 12. CAMERA VARIETY: No more than 40% of shots within a single act may use "static" camera. Actively vary camera movements — use tracking, push-in, pull-out, pan, tilt, crane, dolly, handheld, etc. Match camera energy to the narrative: action scenes need dynamic movement, quiet scenes can be slower but still should not default to all-static.

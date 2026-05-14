@@ -37,7 +37,9 @@ export async function chat(
     messages,
     temperature: options?.temperature ?? 0.7,
     max_tokens: options?.maxTokens ?? 4096,
-    response_format: options?.responseFormat,
+    ...(options?.responseFormat
+      ? { response_format: options.responseFormat }
+      : {}),
   };
   log(`${TEXT_MODEL}:request`, params);
   const response = await client.chat.completions.create(params);

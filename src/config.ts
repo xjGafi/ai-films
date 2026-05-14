@@ -10,7 +10,7 @@ export const VIDEO_API_URL = `${VOLC_PROXY}/api/v3/contents/generations/tasks`;
 export const VOLC_BASE_URL = `${VOLC_PROXY}/api/v3`;
 
 // Models
-export const TEXT_MODEL = "doubao-1-5-pro-32k-250115";
+export const TEXT_MODEL = "doubao-seed-2-0-pro-260215";
 export const IMAGE_MODEL = "doubao-seedream-5-0-260128";
 export const VIDEO_MODEL = "doubao-seedance-2-0-260128";
 

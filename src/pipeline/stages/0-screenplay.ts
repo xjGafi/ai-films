@@ -52,14 +52,19 @@ export async function runScreenplayStage(
   // 2. Call LLM with JSON output mode
   // numActs × 9 shots each; screenplay JSON can exceed 8k tokens
   const raw = await chat(messages, {
-    responseFormat: { type: "json_object" },
     maxTokens: 16384,
   });
 
   // 3. Parse and validate
+  // Strip markdown code fences if model wrapped the output
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+
   let screenplay: Screenplay;
   try {
-    screenplay = JSON.parse(raw);
+    screenplay = JSON.parse(cleaned);
   } catch (err) {
     throw new Error(
       `Failed to parse screenplay JSON: ${err instanceof Error ? err.message : String(err)}`,
