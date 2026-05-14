@@ -123,6 +123,7 @@ program
   .command("run <projectId>")
   .description("Run the AI film pipeline for a project")
   .option("--from <stage>", "resume from a specific stage")
+  .option("--to <stage>", "stop after completing this stage")
   .option("--clean", "clear intermediate files before running")
   .action(async (projectId: string, opts) => {
     const projectDir = findProjectDir(BASE_DIR, projectId);
@@ -144,8 +145,16 @@ program
       process.exit(1);
     }
 
+    const toStage: StageName | undefined = opts.to as StageName | undefined;
+    if (toStage && !STAGE_NAMES.includes(toStage)) {
+      console.error(
+        `Invalid stage: ${toStage}. Valid stages: ${STAGE_NAMES.join(", ")}`,
+      );
+      process.exit(1);
+    }
+
     try {
-      await runPipeline(projectDir, { fromStage });
+      await runPipeline(projectDir, { fromStage, toStage });
       console.log("Pipeline completed successfully.");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -313,7 +322,11 @@ program
 program
   .command("parse <story-file>")
   .description("Parse a story file into a film.json config")
-  .option("--output <path>", "output path for film.json", "./film.json")
+  .option(
+    "--output <path>",
+    "output path for film.json",
+    "./tests/fixtures/film.json",
+  )
   .option("--run", "auto-execute create + run after parsing")
   .option("--dry-run", "print result to stdout without writing or running")
   .action(async (storyFile: string, opts) => {

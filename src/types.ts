@@ -211,6 +211,7 @@ export interface ParsedFilmConfig {
 
 export interface RunOptions {
   fromStage?: StageName;
+  toStage?: StageName;
   clean?: boolean;
   clipIndex?: number; // for regen command
 }

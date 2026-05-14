@@ -1,3 +1,4 @@
+import { closeLogger, initLogger, log } from "../logger.js";
 import type { RunOptions, StageName, StageResult } from "../types.js";
 import { STAGE_NAMES } from "../types.js";
 import { ProjectState } from "./state.js";
@@ -44,36 +45,53 @@ export async function runPipeline(
   projectDir: string,
   options?: RunOptions,
 ): Promise<void> {
+  initLogger(projectDir);
   const state = ProjectState.load(projectDir);
 
   // If restarting from a specific stage, reset it and everything after.
   if (options?.fromStage) {
     state.resetFrom(options.fromStage);
     state.save();
+    log("pipeline", `reset from stage: ${options.fromStage}`);
   }
 
-  for (const stageName of STAGE_NAMES) {
-    // Skip stages that are already done.
-    if (state.isCompleted(stageName)) {
-      continue;
-    }
+  try {
+    for (const stageName of STAGE_NAMES) {
+      // Skip stages that are already done.
+      if (state.isCompleted(stageName)) {
+        continue;
+      }
 
-    console.log(`[${stageName}] starting...`);
-    state.markInProgress(stageName);
-    state.save();
+      console.log(`[${stageName}] starting...`);
+      log("stage:start", stageName);
+      state.markInProgress(stageName);
+      state.save();
 
-    try {
-      const handler = HANDLERS[stageName];
-      const result: StageResult = await handler(projectDir, state);
-      state.markCompleted(stageName, result.artifacts);
-      state.save();
-      console.log(`[${stageName}] completed`);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      state.recordError(stageName, message);
-      state.save();
-      console.error(`[${stageName}] failed: ${message}`);
-      break; // stop pipeline on first failure
+      try {
+        const handler = HANDLERS[stageName];
+        const result: StageResult = await handler(projectDir, state);
+        state.markCompleted(stageName, result.artifacts);
+        state.save();
+        log("stage:complete", {
+          stage: stageName,
+          artifacts: result.artifacts,
+        });
+        console.log(`[${stageName}] completed`);
+
+        if (options?.toStage && stageName === options.toStage) {
+          console.log(`[pipeline] stopping after stage: ${stageName}`);
+          break;
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        state.recordError(stageName, message);
+        state.save();
+        log("stage:error", { stage: stageName, error: message });
+        console.error(`[${stageName}] failed: ${message}`);
+        break; // stop pipeline on first failure
+      }
     }
+  } finally {
+    closeLogger();
   }
 }
