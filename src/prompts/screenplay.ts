@@ -106,7 +106,17 @@ KEY REQUIREMENTS:
    - Furniture and prop placement
    - Lighting: direction, intensity, color temperature, mood
    - Overall color palette
-   Be specific enough that an image generator can reproduce the exact same room twice.`;
+   Be specific enough that an image generator can reproduce the exact same room twice.
+
+11. NO FILLER SHOTS: Never pad an act with empty visual beats such as fade-to-black, title cards, "screen goes dark", or repeated pull-out/zoom-out sequences. Every shot must contain meaningful narrative action or character performance. If the story's remaining content does not fill 9 shots, invent additional character reactions, environmental details, or visual metaphors that enrich the scene — do not resort to "the screen fades" or "the film ends".
+
+12. CAMERA VARIETY: No more than 40% of shots within a single act may use "static" camera. Actively vary camera movements — use tracking, push-in, pull-out, pan, tilt, crane, dolly, handheld, etc. Match camera energy to the narrative: action scenes need dynamic movement, quiet scenes can be slower but still should not default to all-static.
+
+13. PACE VARIATION: Each act MUST use at least 2 different pace values out of "slow", "medium", "fast". A uniform pace across all 9 shots kills rhythm. Build tension with fast cuts, release it with slow beats. Think in editing patterns: fast-fast-slow, medium-fast-medium, etc.
+
+14. CHARACTER DESCRIPTIONS — NO SCENE PROPS: The "detailedDescription" field describes the character's permanent physical appearance only — body, face, hair, clothing, accessories they always wear. Do NOT include scene-specific props (food, drinks, weapons picked up during the story, etc.) as these will contaminate the character reference sheet. Props belong in shot "action" descriptions, not in character definitions.
+
+15. CHARACTER DESCRIPTIONS — NO TEMPLATE LANGUAGE: Avoid generic, cliché appearance phrases like "五官精致" (delicate features), "眼神锐利" (sharp eyes), "鼻梁高挺" (high nose bridge). These are too vague for image generation. Instead, describe specific, distinctive visual traits: unusual color combinations, asymmetric features, visible textures, material contrasts on clothing, signature silhouette shapes. Each character should be visually distinguishable from any other character based on the description alone.`;
 
 export function buildScreenplayPrompt(
   story: string,
