@@ -24,7 +24,7 @@ export const DEFAULT_STYLE = "cinematic";
 // Video generation
 export const VIDEO_SEGMENT_DURATION = 15; // seconds per Seedance clip
 export const VIDEO_POLL_INTERVAL_MS = 10_000; // 10s between polls
-export const VIDEO_MAX_POLL_MS = 600_000; // 10 min timeout per clip
+export const VIDEO_MAX_POLL_MS = 1_200_000; // 20 min timeout per clip
 export const VIDEO_MAX_RETRIES = 3;
 
 // Frame extraction
