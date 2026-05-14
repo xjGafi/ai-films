@@ -1,9 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { buildSeedancePrompt } from "../../prompts/video-shot.js";
-import { chat } from "../../providers/volcengine.js";
 import type {
-  CharacterSpec,
   SceneSpec,
   Screenplay,
   ShotSpec,
@@ -33,38 +31,6 @@ function getPrimaryScene(shots: ShotSpec[]): string | undefined {
   }
   if (counts.size === 0) return undefined;
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-}
-
-async function translateCharacterDescriptions(
-  characters: CharacterSpec[],
-): Promise<Map<string, string>> {
-  const list = characters
-    .map((c, i) => `${i + 1}. ${c.name}: ${c.detailedDescription}`)
-    .join("\n\n");
-
-  const result = await chat(
-    [
-      {
-        role: "user",
-        content: `Translate the following character appearance descriptions to English for use in a video generation prompt. Use precise, specific visual vocabulary: exact color names (e.g. "charcoal grey" not "dark grey"), specific material names (e.g. "cotton crew-neck T-shirt"), concrete physical descriptors (e.g. "deeply receding hairline" not "sparse hair"). Focus only on visual appearance — no personality, backstory, or abstract traits. Return JSON: { "translations": [{ "name": "...", "description": "..." }] }\n\n${list}`,
-      },
-    ],
-    { temperature: 0.2 },
-  );
-
-  const cleaned = result
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "");
-
-  const parsed = JSON.parse(cleaned) as {
-    translations: { name: string; description: string }[];
-  };
-  const map = new Map<string, string>();
-  for (const item of parsed.translations) {
-    if (item.name && item.description) map.set(item.name, item.description);
-  }
-  return map;
 }
 
 export async function runPromptsStage(
@@ -106,10 +72,6 @@ export async function runPromptsStage(
 
   const sceneSpecMap = new Map<string, SceneSpec>(
     (screenplay.scenes ?? []).map((s) => [s.id, s]),
-  );
-
-  const charDescEnMap = await translateCharacterDescriptions(
-    screenplay.characters,
   );
 
   const artifacts: Record<string, string> = {};
@@ -154,7 +116,6 @@ export async function runPromptsStage(
     const referenceDesc = buildReferenceDescription(
       screenplay,
       charRefMap,
-      charDescEnMap,
       hasPrevLastFrame,
       sceneRefPath,
       sceneName,
@@ -259,7 +220,6 @@ function assembleReferenceImages(
 function buildReferenceDescription(
   screenplay: Screenplay,
   charRefMap: Map<string, string>,
-  charDescEnMap: Map<string, string>,
   hasPrevLastFrame: boolean,
   sceneRefPath: string | undefined,
   sceneName: string | undefined,
@@ -270,7 +230,7 @@ function buildReferenceDescription(
   // Characters first — highest priority so the model anchors on them for identity
   for (const char of screenplay.characters) {
     if (imgIdx > MAX_REFERENCE_IMAGES) break;
-    const desc = charDescEnMap.get(char.name) ?? char.detailedDescription;
+    const desc = char.detailedDescription;
     if (charRefMap.has(char.name)) {
       parts.push(`[Image${imgIdx}] is ${char.name}: ${desc}`);
       imgIdx++;

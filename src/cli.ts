@@ -368,8 +368,12 @@ program
       characters: parsed.characters.map((c) => ({
         name: c.name,
         description: c.description,
+        detailedDescription: c.detailedDescription,
       })) satisfies CharacterInput[],
-      scenes: parsed.scenes.map((s) => ({ id: s.id })),
+      scenes: parsed.scenes.map((s) => ({
+        id: s.id,
+        sceneDescription: s.sceneDescription,
+      })),
     };
 
     const outputPath = path.resolve(opts.output);

@@ -130,6 +130,9 @@ export function buildScreenplayPrompt(
     .map((c) => {
       let line = `- ${c.name}`;
       if (c.imagePath) line += ` (has reference image)`;
+      if (c.detailedDescription) {
+        line += `\n  FIXED DESCRIPTION (use EXACTLY as-is in output, do not modify): ${c.detailedDescription}`;
+      }
       return line;
     })
     .join("\n");
@@ -152,6 +155,7 @@ Produce the JSON screenplay now. Remember:
 - Total number of acts: ${numActs} acts (${numActs} × 15s = ${numActs * 15}s)
 - Include transitionHints at each act boundary (after the last shot of each act except the final)
 - Character descriptions must be detailed enough for image generation prompts
+- If a character already has a FIXED DESCRIPTION, copy it verbatim into detailedDescription — do not paraphrase or regenerate
 - Action descriptions must be visual and camera-oriented
 - Include a "scenes" array with one entry per unique location; id must match shot scene values`;
 

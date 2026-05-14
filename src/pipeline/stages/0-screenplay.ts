@@ -120,6 +120,26 @@ export async function runScreenplayStage(
 
   assignShotTimestamps(screenplay.acts);
 
+  // Force-override character descriptions with pre-generated English descriptions from config
+  const charInputMap = new Map(state.config.characters.map((c) => [c.name, c]));
+  for (const charSpec of screenplay.characters) {
+    const inputChar = charInputMap.get(charSpec.name);
+    if (inputChar?.detailedDescription) {
+      charSpec.detailedDescription = inputChar.detailedDescription;
+    }
+  }
+
+  // Force-override scene descriptions with pre-generated English descriptions from config
+  const sceneInputMap = new Map(
+    (state.config.scenes ?? []).map((s) => [s.id, s]),
+  );
+  for (const sceneSpec of screenplay.scenes) {
+    const inputScene = sceneInputMap.get(sceneSpec.id);
+    if (inputScene?.sceneDescription) {
+      sceneSpec.sceneDescription = inputScene.sceneDescription;
+    }
+  }
+
   // 4. Save screenplay
   const outPath = path.join(projectDir, "screenplay.json");
   const dir = path.dirname(outPath);

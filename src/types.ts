@@ -33,12 +33,14 @@ export interface CharacterInput {
   name: string;
   description?: string;
   imagePath?: string;
+  detailedDescription?: string;
 }
 
 export interface SceneInput {
   id: string;
   description?: string;
   imagePath?: string;
+  sceneDescription?: string;
 }
 
 export interface ProjectConfig {
@@ -198,8 +200,12 @@ export interface StageResult {
 export interface ParsedFilmConfig {
   title: string;
   story: string;
-  characters: { name: string; description: string }[];
-  scenes: { id: string; description: string }[];
+  characters: {
+    name: string;
+    description: string;
+    detailedDescription: string;
+  }[];
+  scenes: { id: string; description: string; sceneDescription: string }[];
   duration: 60 | 90 | 120;
   style: "cinematic" | "anime" | "3d-pixar";
   resolution: "720p" | "1080p";
