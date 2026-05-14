@@ -11,7 +11,7 @@ const STYLE_KEYWORDS: Record<VideoStyle, string> = {
   anime:
     "Clean anime storyboard sketch style. Bold ink outlines with light pencil shading, anime composition sensibility, impact lines where appropriate.",
   "3d-pixar":
-    "Pixar-style storyboard sketch. Rounded forms, expressive gesture drawings, warm production-board aesthetic. Colored pencil shading on cream paper.",
+    "Pixar-style storyboard sketch. Rounded forms, expressive gesture drawings, warm production-board aesthetic. Black and white pencil on cream paper.",
 };
 
 export interface StoryboardContinuity {
@@ -25,6 +25,7 @@ export function buildStoryboardPrompt(
   style: string,
   grid: { cols: number; rows: number },
   continuity?: StoryboardContinuity,
+  actNum?: number,
 ): string {
   const styleKey = style as VideoStyle;
   const styleBlock = STYLE_KEYWORDS[styleKey] ?? STYLE_KEYWORDS["cinematic"];
@@ -82,7 +83,12 @@ export function buildStoryboardPrompt(
 
 No timestamps in panels.`;
 
-  return `Generate a ${panelShots.length}-panel cinematic storyboard in a ${grid.cols}-column x ${grid.rows}-row grid layout.
+  const seriesAnchor =
+    actNum !== undefined && actNum > 1
+      ? `This is act ${actNum} in a multi-act storyboard series. Maintain IDENTICAL visual style to previous acts: same paper texture, same line weight, same color palette, same character design proportions.\n\n`
+      : "";
+
+  return `${seriesAnchor}Generate a ${panelShots.length}-panel cinematic storyboard in a ${grid.cols}-column x ${grid.rows}-row grid layout.
 Each panel is framed 16:9. The drawings themselves must be black and white only: rough pencil lines, minimal detail, fast gesture drawing energy, simple anatomy construction and strong silhouette readability.
 
 ${styleBlock}
