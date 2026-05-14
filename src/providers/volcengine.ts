@@ -9,6 +9,7 @@ import {
   VIDEO_POLL_INTERVAL_MS,
   VOLC_BASE_URL,
 } from "../config.js";
+import { log } from "../logger.js";
 
 // ─── Client setup ───
 
@@ -31,15 +32,18 @@ export async function chat(
   options?: ChatOptions,
 ): Promise<string> {
   const client = getClient();
-  const response = await client.chat.completions.create({
+  const params = {
     model: TEXT_MODEL,
     messages,
     temperature: options?.temperature ?? 0.7,
     max_tokens: options?.maxTokens ?? 4096,
     response_format: options?.responseFormat,
-  });
+  };
+  log(`${TEXT_MODEL}:request`, params);
+  const response = await client.chat.completions.create(params);
   const content = response.choices[0]?.message?.content;
   if (!content) throw new Error("Empty response from text API");
+  log(`${TEXT_MODEL}:response`, content);
   return content;
 }
 
@@ -56,19 +60,27 @@ export async function generateImage(
   options?: ImageOptions,
 ): Promise<Buffer> {
   const client = getClient();
-  const response = await client.images.generate({
+  const params = {
     model: IMAGE_MODEL,
     prompt,
     size: (options?.size ??
       "1920x1920") as OpenAI.Images.ImageGenerateParams["size"],
     n: 1,
-    response_format: "b64_json",
+    response_format: "url" as const,
     ...(options?.seed !== undefined && { seed: options.seed }),
-  } as Parameters<typeof client.images.generate>[0]);
+  };
+  log(`${IMAGE_MODEL}:request`, params);
+  const response = await client.images.generate(
+    params as Parameters<typeof client.images.generate>[0],
+  );
+  log(`${IMAGE_MODEL}:response`, response);
 
-  const b64 = response.data?.[0]?.b64_json;
-  if (!b64) throw new Error("No image data in response");
-  return Buffer.from(b64, "base64");
+  const url = response.data?.[0]?.url;
+  if (!url) throw new Error("No image URL in response");
+  const download = await fetch(url);
+  if (!download.ok)
+    throw new Error(`Image download failed (${download.status}): ${url}`);
+  return Buffer.from(await download.arrayBuffer());
 }
 
 // ─── Video generation (async task) ───
@@ -120,6 +132,8 @@ export async function submitVideoTask(
   if (params.aspect_ratio) body.aspect_ratio = params.aspect_ratio;
   if (params.seed !== undefined) body.seed = params.seed;
 
+  log(`${VIDEO_MODEL}:request`, body);
+
   const response = await fetch(`${VOLC_BASE_URL}/contents/generations/tasks`, {
     method: "POST",
     headers: {
@@ -137,6 +151,8 @@ export async function submitVideoTask(
   }
 
   const data = await response.json();
+  log(`${VIDEO_MODEL}:response`, data);
+
   const taskId = data.id ?? data.task_id ?? data.data?.id;
   if (!taskId) {
     throw new Error(
@@ -170,7 +186,6 @@ export async function pollVideoTask(taskId: string): Promise<VideoResult> {
       status === "succeeded" ||
       status === "complete"
     ) {
-      // Extract video URL from response — format may vary
       const videoUrl =
         data.content?.video_url ??
         data.data?.content?.video_url ??
@@ -186,16 +201,18 @@ export async function pollVideoTask(taskId: string): Promise<VideoResult> {
       const duration =
         data.content?.duration ?? data.data?.content?.duration ?? 0;
 
+      log("video-poll:complete", data);
       return { url: videoUrl, duration, taskId };
     }
 
     if (status === "FAILED" || status === "failed" || status === "error") {
       const errorMsg =
         data.error_message ?? data.data?.error_message ?? "Unknown error";
+      log("video-poll:failed", data);
       throw new Error(`Video task failed: ${errorMsg}`);
     }
 
-    // Still processing — wait and retry
+    log("video-poll:pending", data);
     await new Promise((r) => setTimeout(r, VIDEO_POLL_INTERVAL_MS));
   }
 
