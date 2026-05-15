@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildSeedancePrompt } from "../../prompts/video-shot.js";
 import type {
+  CharacterSpec,
   SceneSpec,
   Screenplay,
   ShotSpec,
@@ -96,6 +97,12 @@ export async function runPromptsStage(
 
     const shotsWithAct = act.shots.map((s) => ({ ...s, actNumber: act.act }));
 
+    // 过滤出本段实际出场的角色
+    const actingCharacters = getActingCharacters(
+      act.shots,
+      screenplay.characters,
+    );
+
     const transitionStrategy = determineTransitionStrategy(
       shotsWithAct,
       segmentId,
@@ -104,7 +111,7 @@ export async function runPromptsStage(
     );
 
     const referenceImageRefs = assembleReferenceImages(
-      screenplay,
+      actingCharacters,
       charRefMap,
       prevLastFramePath,
       sceneRefPath,
@@ -114,7 +121,7 @@ export async function runPromptsStage(
       prevLastFramePath !== undefined && fs.existsSync(prevLastFramePath);
 
     const referenceDesc = buildReferenceDescription(
-      screenplay,
+      actingCharacters,
       charRefMap,
       hasPrevLastFrame,
       sceneRefPath,
@@ -122,17 +129,18 @@ export async function runPromptsStage(
     );
 
     const totalSegments = screenplay.acts.length;
+    const isLastSegment = segmentId === screenplay.acts.length;
     const intent = buildIntent(act, segmentId, totalSegments);
     const rules = buildRules(
       shotsWithAct,
-      screenplay,
+      actingCharacters,
       segmentId,
       hasPrevLastFrame,
     );
     const cameraNotes = buildCameraNotes(shotsWithAct);
     const soundDesign = buildSoundDesign(shotsWithAct);
-    const negatives = buildNegatives(shotsWithAct);
-    const endState = buildEndState(shotsWithAct);
+    const negatives = buildNegatives(shotsWithAct, state.config.style);
+    const endState = buildEndState(shotsWithAct, isLastSegment);
     const continuityNote = buildContinuityNote(
       shotsWithAct,
       segmentId,
@@ -183,21 +191,31 @@ export async function runPromptsStage(
 
 const MAX_REFERENCE_IMAGES = 9;
 
+/**
+ * 过滤出在本段镜头中实际出现的角色。
+ * 通过检查 shot.action 和 shot.title 文本中是否包含角色名或 (id) 来判断。
+ * 安全兜底：如果没有任何匹配，返回全部角色。
+ */
+function getActingCharacters(
+  shots: ShotSpec[],
+  characters: CharacterSpec[],
+): CharacterSpec[] {
+  const allText = shots.map((s) => `${s.action} ${s.title ?? ""}`).join(" ");
+  const acting = characters.filter(
+    (char) => allText.includes(char.name) || allText.includes(`(${char.id})`),
+  );
+  return acting.length > 0 ? acting : characters;
+}
+
 function assembleReferenceImages(
-  screenplay: Screenplay,
+  actingCharacters: CharacterSpec[],
   charRefMap: Map<string, string>,
   prevLastFramePath: string | undefined,
   sceneRefPath: string | undefined,
 ): string[] {
   const refs: string[] = [];
 
-  // Character refs first — highest priority for cross-scene identity consistency
-  for (const char of screenplay.characters) {
-    if (refs.length >= MAX_REFERENCE_IMAGES) break;
-    const refPath = charRefMap.get(char.name);
-    if (refPath) refs.push(refPath);
-  }
-
+  // prevLastFrame 优先 — 模型最需要它来保持跨片段的视觉连续性
   if (
     prevLastFramePath &&
     fs.existsSync(prevLastFramePath) &&
@@ -206,6 +224,14 @@ function assembleReferenceImages(
     refs.push(prevLastFramePath);
   }
 
+  // 然后是本段实际出场的角色
+  for (const char of actingCharacters) {
+    if (refs.length >= MAX_REFERENCE_IMAGES) break;
+    const refPath = charRefMap.get(char.name);
+    if (refPath) refs.push(refPath);
+  }
+
+  // 场景参考图放最后
   if (
     sceneRefPath &&
     refs.length < MAX_REFERENCE_IMAGES &&
@@ -218,7 +244,7 @@ function assembleReferenceImages(
 }
 
 function buildReferenceDescription(
-  screenplay: Screenplay,
+  actingCharacters: CharacterSpec[],
   charRefMap: Map<string, string>,
   hasPrevLastFrame: boolean,
   sceneRefPath: string | undefined,
@@ -227,8 +253,16 @@ function buildReferenceDescription(
   const parts: string[] = [];
   let imgIdx = 1;
 
-  // Characters first — highest priority so the model anchors on them for identity
-  for (const char of screenplay.characters) {
+  // prevLastFrame 在数组第一位，所以描述也放第一条
+  if (hasPrevLastFrame) {
+    parts.push(
+      `[Image${imgIdx}] is the EXACT last frame of the previous clip. Your opening frames MUST match this image — same background, same lighting, same color palette, same character positions, same camera angle. This is the highest-priority continuity reference.`,
+    );
+    imgIdx++;
+  }
+
+  // 本段实际出场的角色
+  for (const char of actingCharacters) {
     if (imgIdx > MAX_REFERENCE_IMAGES) break;
     const desc = char.detail;
     if (charRefMap.has(char.name)) {
@@ -239,13 +273,7 @@ function buildReferenceDescription(
     }
   }
 
-  if (hasPrevLastFrame) {
-    parts.push(
-      `[Image${imgIdx}] is the EXACT last frame of the previous clip. Your opening frames MUST match this image — same background, same lighting, same color palette, same character positions, same camera angle. This is the highest-priority continuity reference.`,
-    );
-    imgIdx++;
-  }
-
+  // 场景参考图放最后
   if (sceneRefPath && fs.existsSync(sceneRefPath)) {
     const label = sceneName ?? "this scene";
     parts.push(
@@ -267,12 +295,23 @@ function determineTransitionStrategy(
 ): TransitionStrategy {
   if (segmentId === 1) return "continuity_crossfade";
 
+  const firstShot = shots[0];
+
   if (prevLastShot) {
     const hint = transitionHintMap.get(prevLastShot.id);
-    if (hint) return hint;
+    if (hint) {
+      // occlusion_transition 要求两个镜头处于同一物理空间，否则降级为 hard_cut
+      if (hint === "occlusion_transition") {
+        const sameScene =
+          prevLastShot?.scene &&
+          firstShot?.scene &&
+          prevLastShot.scene === firstShot.scene;
+        if (!sameScene) return "hard_cut";
+      }
+      return hint;
+    }
   }
 
-  const firstShot = shots[0];
   if (
     prevLastShot &&
     firstShot &&
@@ -308,13 +347,14 @@ function buildIntent(
 
 function buildRules(
   shots: Array<ShotSpec & { actNumber: number }>,
-  screenplay: Screenplay,
+  actingCharacters: CharacterSpec[],
   segmentId: number,
   hasPrevLastFrame: boolean,
 ): string[] {
   const rules: string[] = [];
 
-  const charNames = screenplay.characters.map((c) => c.name);
+  // 只列出本段实际出场的角色
+  const charNames = actingCharacters.map((c) => c.name);
   if (charNames.length > 0) {
     rules.push(
       `Maintain exact appearance of ${charNames.join(", ")} throughout all shots — no drift in facial features, clothing, or proportions.`,
@@ -383,12 +423,19 @@ function buildSoundDesign(
 
 function buildNegatives(
   shots: Array<ShotSpec & { actNumber: number }>,
+  style: string,
 ): string[] {
+  // 3d-pixar 风格本身就是 3D，禁止 2D 扁平风格；其他风格禁止 3D/卡通渲染
+  const renderingNegative =
+    style === "3d-pixar"
+      ? "use flat 2D cartoon style"
+      : "use cartoon or 3D rendering unless specified in style";
+
   const negatives: string[] = [
     "add text overlays or watermarks",
     "introduce characters not described above",
     "skip or reorder any shot",
-    "use cartoon or 3D rendering unless specified in style",
+    renderingNegative,
   ];
   if (shots.some((s) => s.pace === "fast")) {
     negatives.push("slow down the action — maintain the fast rhythm");
@@ -396,12 +443,20 @@ function buildNegatives(
   return negatives;
 }
 
-function buildEndState(shots: Array<ShotSpec & { actNumber: number }>): string {
+function buildEndState(
+  shots: Array<ShotSpec & { actNumber: number }>,
+  isLastSegment: boolean,
+): string {
   const lastShot = shots[shots.length - 1];
   if (!lastShot) return "Scene fades to black.";
   let desc = lastShot.action;
   if (lastShot.emotion) desc += ` Emotion: ${lastShot.emotion}.`;
-  desc += " The next clip will continue from this state.";
+  // 最后一段不需要「下一片段继续」的提示
+  if (isLastSegment) {
+    desc += " This is the final scene. The film ends here.";
+  } else {
+    desc += " The next clip will continue from this state.";
+  }
   return desc;
 }
 
