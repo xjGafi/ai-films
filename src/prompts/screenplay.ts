@@ -175,7 +175,7 @@ Produce the JSON screenplay now. Remember:
 - Total number of acts: ${numActs} acts (${numActs} × 15s = ${numActs * 15}s)
 - Include transitionHints at each act boundary (after the last shot of each act except the final)
 - Character descriptions must be detailed enough for image generation prompts
-- If a character already has a FIXED DESCRIPTION, copy it verbatim into detailedDescription — do not paraphrase or regenerate
+- If a character already has a FIXED DESCRIPTION, copy it verbatim into the "detail" field — do not paraphrase or regenerate
 - Action descriptions must be visual and camera-oriented
 - Include a "scenes" array with one entry per unique location; id must use format "scene-1", "scene-2"... matching shot scene values
 - If FIXED SCENES are provided, use their exact ids in both the "scenes" array and all shot "scene" fields`;
