@@ -322,7 +322,7 @@ function determineTransitionStrategy(
       prevLastShot.scene &&
       firstShot.scene !== prevLastShot.scene
     ) {
-      return "occlusion_transition";
+      return "hard_cut";
     }
     return "continuity_crossfade";
   }
