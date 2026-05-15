@@ -14,14 +14,14 @@ You MUST output valid JSON matching this schema (no markdown fences, no commenta
   "totalDuration": number,
   "characters": [
     {
-      "id": string,   // e.g. "A", "B" — reuse directly from input, do NOT generate new ids
+      "id": string,   // e.g. "character-1", "character-2" — use this exact format
       "name": string,
       "detail": string  // FULL physical description for reuse in image/video prompts
     }
   ],
   "scenes": [
     {
-      "id": string,          // letter identifier — must exactly match the FIXED SCENES ids if provided
+      "id": string,          // e.g. "scene-1", "scene-2" — use this exact format; must exactly match the FIXED SCENES ids if provided
       "name": string,        // short readable name
       "description": string, // brief description
       "detail": string       // detailed physical environment description (see requirement 10)
@@ -44,7 +44,7 @@ You MUST output valid JSON matching this schema (no markdown fences, no commenta
           "physics": string,         // optional physics tag: "Rigid body collisions", "Fluid movement", etc.
           "pace": string,            // "slow" | "medium" | "fast" — controls shot duration weight
           "actionContinuous": boolean, // true if action flows directly from previous shot
-          "scene": string            // scene id (letter) for transition logic, e.g. "A", "B"
+          "scene": string            // scene id for transition logic, e.g. "scene-1", "scene-2"
         }
       ]
     }
@@ -88,6 +88,7 @@ KEY REQUIREMENTS:
    - Physical interactions with environment
    - Emotional expressions visible on screen
    - Any relevant props or objects
+   - FIRST APPEARANCE LABEL: When a character appears for the first time in a shot, append their id in parentheses after their name: e.g. "老王 (character-1) sits on the bench" or "insulin搬运工小人 (character-2) carry the key". This label helps downstream processing identify which characters appear in each segment.
 
 7. SHOT PACING: The "pace" field controls both editing rhythm AND shot duration. The pipeline uses pace to compute precise timestamps, so choose carefully:
    - slow: long lingering shot, contemplative movement, landscape, emotion (gets more screen time)
@@ -99,9 +100,9 @@ KEY REQUIREMENTS:
    - Movement: tracking, dolly, pan (left/right), tilt (up/down), push-in, pull-out, crane, handheld, static, zoom
    - Qualifiers: smooth, rapid, slow, gentle, violent, circling, orbiting
 
-9. SCENE IDENTIFIERS: Use letter ids (A, B, C…) as scene identifiers so the pipeline can determine transition strategies between clips. If FIXED SCENES are provided, use their exact ids.
+9. SCENE IDENTIFIERS: Use semantic ids for scenes in the format "scene-1", "scene-2", "scene-3" etc. Use "character-1", "character-2" etc. for character ids. If FIXED SCENES or FIXED CHARACTERS are provided, use their exact ids as given — do not rename.
 
-10. SCENE DESCRIPTIONS: For every unique location that appears in the shots, add one entry to the "scenes" array. The "id" must be a letter (A, B, …) matching the FIXED SCENES ids if provided, and must exactly match the "scene" field values used in the shot objects. Each "detail" must cover:
+10. SCENE DESCRIPTIONS: For every unique location that appears in the shots, add one entry to the "scenes" array. The "id" must use the format "scene-1", "scene-2"... matching the FIXED SCENES ids if provided, and must exactly match the "scene" field values used in the shot objects. Each "detail" must cover:
    - Spatial layout: room shape, size, open/enclosed feel
    - Wall/floor/ceiling: materials, colors, textures
    - Furniture and prop placement
@@ -119,7 +120,13 @@ CRITICAL: Never use ASCII double-quote characters ( " ) inside any JSON string v
 
 14. CHARACTER DESCRIPTIONS — NO SCENE PROPS: The "detail" field describes the character's permanent physical appearance only — body, face, hair, clothing, accessories they always wear. Do NOT include scene-specific props (food, drinks, weapons picked up during the story, etc.) as these will contaminate the character reference sheet. Props belong in shot "action" descriptions, not in character definitions.
 
-15. CHARACTER DESCRIPTIONS — NO TEMPLATE LANGUAGE: Avoid generic, cliché appearance phrases like "五官精致" (delicate features), "眼神锐利" (sharp eyes), "鼻梁高挺" (high nose bridge). These are too vague for image generation. Instead, describe specific, distinctive visual traits: unusual color combinations, asymmetric features, visible textures, material contrasts on clothing, signature silhouette shapes. Each character should be visually distinguishable from any other character based on the description alone.`;
+15. CHARACTER DESCRIPTIONS — NO TEMPLATE LANGUAGE: Avoid generic, cliché appearance phrases like "五官精致" (delicate features), "眼神锐利" (sharp eyes), "鼻梁高挺" (high nose bridge). These are too vague for image generation. Instead, describe specific, distinctive visual traits: unusual color combinations, asymmetric features, visible textures, material contrasts on clothing, signature silhouette shapes. Each character should be visually distinguishable from any other character based on the description alone.
+
+16. GROUP CHARACTERS: If a character represents a group of identical figures (e.g. "workers", "guards", "clones"), the "detail" field MUST start with "A group of identical [N]..." and describe their shared appearance as a collective unit. Do NOT write a singular description for a character that always appears as a group in the story. Example: "A group of identical 10cm tall tiny humanoid figures, each with short cropped white hair, round friendly cartoon faces, wears matching bright blue canvas work overalls..."
+
+17. SCALE CHANGES: If a character appears at a non-standard size in any shot (miniaturized, enlarged, or at a scale significantly different from their baseline), the shot's "action" description MUST include a concrete size reference anchored to a visible object in the same frame. Example: "a miniaturized 8cm-tall version of 康小达@kkkk (character-3), no taller than the shirt collar beside them". Never use just "tiny" or "small" without an explicit measurement or comparison object.
+
+18. SCENE TRANSITION SHOTS: When consecutive acts take place in different scenes, the FIRST shot of the new act must contain a narrative or psychological bridging element visible in frame — such as a character's reaction that references the previous scene, a visual echo or ghost image of the prior environment, or an environmental cue that motivates the location change. Never open a new-scene act with a cold shot that gives no reason for the location. Also: use "occlusion_transition" ONLY when a physical object (door, wall, crowd, passing vehicle) can plausibly occlude the cut within the shared physical space. For abstract location jumps (body interior → outdoors, dream → reality), use "hard_cut" instead.`;
 
 export function buildScreenplayPrompt(
   story: string,
@@ -170,7 +177,7 @@ Produce the JSON screenplay now. Remember:
 - Character descriptions must be detailed enough for image generation prompts
 - If a character already has a FIXED DESCRIPTION, copy it verbatim into detailedDescription — do not paraphrase or regenerate
 - Action descriptions must be visual and camera-oriented
-- Include a "scenes" array with one entry per unique location; id must be a letter (A, B, …) matching shot scene values
+- Include a "scenes" array with one entry per unique location; id must use format "scene-1", "scene-2"... matching shot scene values
 - If FIXED SCENES are provided, use their exact ids in both the "scenes" array and all shot "scene" fields`;
 
   return [
