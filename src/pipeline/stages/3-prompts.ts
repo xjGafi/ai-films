@@ -432,7 +432,7 @@ function buildNegatives(
       : "use cartoon or 3D rendering unless specified in style";
 
   const negatives: string[] = [
-    "add text overlays or watermarks",
+    "add production watermarks, subtitles, or captions not described in the shots",
     "introduce characters not described above",
     "skip or reorder any shot",
     renderingNegative,
