@@ -70,14 +70,10 @@ export function buildSeedancePrompt(config: VideoPromptConfig): string {
 
   // 6. SHOTS
   parts.push("SHOT SEQUENCE:");
-  const numRows = Math.ceil(config.shots.length / SHOTS_PER_ROW);
-  const rowDuration = config.totalDuration / numRows;
   for (let i = 0; i < config.shots.length; i++) {
     if (i % SHOTS_PER_ROW === 0) {
       const rowNum = Math.floor(i / SHOTS_PER_ROW) + 1;
-      const rowStart = Math.round((rowNum - 1) * rowDuration);
-      const rowEnd = Math.round(rowNum * rowDuration);
-      parts.push(`[Row ${rowNum} — ${rowStart}–${rowEnd}s]`);
+      parts.push(`[Row ${rowNum}]`);
     }
 
     const shot = config.shots[i];
@@ -122,7 +118,7 @@ export function buildSeedancePrompt(config: VideoPromptConfig): string {
     parts.push(`Do not ${neg}.`);
   }
   parts.push(
-    "Do not add text overlays, music, or extra characters not described above.",
+    "Do not add production watermarks or subtitles. Do not add music or extra characters not described above.",
   );
   parts.push("Do not skip steps.");
   parts.push("");
