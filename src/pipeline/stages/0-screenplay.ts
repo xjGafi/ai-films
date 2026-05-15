@@ -13,8 +13,9 @@ const PACE_WEIGHTS: Record<string, number> = {
 const DEFAULT_PACE_WEIGHT = PACE_WEIGHTS.medium;
 
 function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds % 60);
+  const totalSeconds = Math.round(seconds);
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
