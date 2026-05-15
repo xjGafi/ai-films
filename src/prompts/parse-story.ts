@@ -48,7 +48,7 @@ INFERENCE RULES:
    - Face: shape and distinctive features
    - Clothing: exact garments, colors, materials, accessories
    - Distinguishing marks if any
-   For "detailedDescription": Write in English only. Use precise visual vocabulary — exact color names (e.g. "charcoal grey" not "dark grey"), specific material names (e.g. "cotton crew-neck polo shirt"), concrete physical descriptors (e.g. "deeply receding hairline"). Describe ONLY permanent physical appearance — body, face, hair, clothing, accessories always worn. No personality, backstory, scene props, or abstract traits.
+   For "detail": Write in English only. Use precise visual vocabulary — exact color names (e.g. "charcoal grey" not "dark grey"), specific material names (e.g. "cotton crew-neck polo shirt"), concrete physical descriptors (e.g. "deeply receding hairline"). Describe ONLY permanent physical appearance — body, face, hair, clothing, accessories always worn. No personality, backstory, scene props, or abstract traits.
 
 4. SCENES: Identify all distinct locations or settings. Assign letter IDs in order of first appearance (A, B, C…). The "detail" field must be a precise English spatial description covering:
    - Spatial layout: size, open/enclosed feel

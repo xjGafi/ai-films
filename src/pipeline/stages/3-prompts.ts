@@ -12,10 +12,7 @@ import type {
 } from "../../types.js";
 import type { ProjectState } from "../state.js";
 
-const SHOTS_PER_ROW = 3;
-const ROWS_PER_ACT = 3;
 const SEGMENT_DURATION = 15;
-const ROW_DURATION = SEGMENT_DURATION / ROWS_PER_ACT; // 5s per row
 
 /**
  * Stage 3: Build video generation prompts for each act.
