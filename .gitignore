@@ -19,6 +19,7 @@ projects/
 CLAUDE.local.md
 .claude/settings.local.json
 .claude/memory/
+.claude/worktrees/
 
 # Logs
 logs/
