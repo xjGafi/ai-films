@@ -21,7 +21,7 @@ export function buildCharacterSheetPrompt(
   const styleKey = style as VideoStyle;
   const styleBlock = STYLE_KEYWORDS[styleKey] ?? STYLE_KEYWORDS["cinematic"];
 
-  const desc = character.detailedDescription;
+  const desc = character.detail;
 
   return `Generate a professional character reference sheet / model sheet for animation and video production.
 

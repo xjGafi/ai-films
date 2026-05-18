@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | grep -E '\\.ts$' | { read -r f; npx biome check --fix \"$f\" 2>/dev/null; npx tsc --noEmit 2>/dev/null; } || true",
+            "timeout": 30,
+            "statusMessage": "Linting + type-checking..."
+          }
+        ]
+      }
+    ]
+  }
+}

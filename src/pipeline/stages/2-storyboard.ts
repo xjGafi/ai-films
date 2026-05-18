@@ -49,6 +49,7 @@ export async function runStoryboardStage(
       state.config.style,
       { cols: GRID_COLS, rows: GRID_ROWS },
       continuity,
+      actNum,
     );
 
     // Request 1920×1920 — meets API minimum pixel requirement and gives square cells

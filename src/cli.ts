@@ -366,10 +366,17 @@ program
       resolution: parsed.resolution,
       aspectRatio: parsed.aspectRatio,
       characters: parsed.characters.map((c) => ({
+        id: c.id,
         name: c.name,
         description: c.description,
+        detail: c.detail,
       })) satisfies CharacterInput[],
-      scenes: parsed.scenes.map((s) => ({ id: s.id })),
+      scenes: parsed.scenes.map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        detail: s.detail,
+      })),
     };
 
     const outputPath = path.resolve(opts.output);

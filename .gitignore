@@ -15,8 +15,11 @@ projects/
 # Local config overrides (personal, not for sharing)
 *.local.json
 
-# Claude Code local settings
-.claude/
+# Claude Code - ignore local/personal files, commit shared config
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/memory/
+.claude/worktrees/
 
 # Logs
 logs/
