@@ -88,7 +88,7 @@ export async function runPipeline(
         state.save();
         log("stage:error", { stage: stageName, error: message });
         console.error(`[${stageName}] failed: ${message}`);
-        break; // stop pipeline on first failure
+        throw err;
       }
     }
   } finally {
