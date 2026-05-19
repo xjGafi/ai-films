@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import sharp from "sharp";
 import {
   buildStoryboardPrompt,
   type StoryboardContinuity,
@@ -13,13 +12,12 @@ const GRID_COLS = 3;
 const GRID_ROWS = 3;
 
 /**
- * Stage 2: Generate storyboard images and crop row strips.
+ * Stage 2: Generate storyboard images.
  *
  * For each act in the screenplay:
- * - Generate a fixed 3×3 grid storyboard image.
- * - Crop 3 horizontal row strips from the grid.
- * - Place each strip on a 1920×1080 16:9 canvas (letterboxed).
+ * - Generate a fixed 3×3 grid storyboard image (1920×1920).
  * - Pass continuity info (last shot of previous act) to the next act's prompt.
+ * - The raw grid is used directly by Stage 3 as a reference image for Seedance.
  */
 export async function runStoryboardStage(
   projectDir: string,
@@ -56,36 +54,6 @@ export async function runStoryboardStage(
     const buffer = await generateImage(prompt, { size: "1920x1920" });
     saveBuffer(buffer, rawPath);
     artifacts[rawArtifactKey] = `storyboard/act-${actNum}-raw.png`;
-
-    // Read actual image dimensions
-    const metadata = await sharp(rawPath).metadata();
-    const actualW = metadata.width ?? 1920;
-    const actualH = metadata.height ?? 1920;
-    const rowH = Math.floor(actualH / GRID_ROWS);
-
-    // Crop 3 row strips, place each on 1920×1080 canvas
-    for (let rowIdx = 0; rowIdx < GRID_ROWS; rowIdx++) {
-      const rowNum = rowIdx + 1;
-      const top = rowIdx * rowH;
-      const stripH = rowIdx === GRID_ROWS - 1 ? actualH - top : rowH;
-
-      const rowPath = path.join(
-        storyboardDir,
-        `act-${actNum}-row-${rowNum}.png`,
-      );
-      const rowArtifactKey = `storyboard/act-${actNum}-row-${rowNum}.png`;
-
-      await sharp(rawPath)
-        .extract({ left: 0, top, width: actualW, height: stripH })
-        .resize(1920, 1080, {
-          fit: "contain",
-          background: { r: 0, g: 0, b: 0, alpha: 1 },
-        })
-        .png()
-        .toFile(rowPath);
-
-      artifacts[rowArtifactKey] = `storyboard/act-${actNum}-row-${rowNum}.png`;
-    }
 
     continuity = {
       lastShot: act.shots[act.shots.length - 1],
