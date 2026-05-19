@@ -137,11 +137,17 @@ export function buildScreenplayPrompt(
   style: string,
   scenes?: SceneInput[],
 ): Array<{ role: "system" | "user"; content: string }> {
-  const characterList = characters
+  // 归一化角色 id：非标准格式统一转为 character-N
+  const normalizedCharacters = characters.map((c, i) => ({
+    ...c,
+    id: /^character-\d+$/.test(c.id) ? c.id : `character-${i + 1}`,
+  }));
+
+  const characterList = normalizedCharacters
     .map((c) => {
-      let line = `- ${c.name}`;
+      let line = `- [id: ${c.id}] ${c.name}`;
       if (c.detail)
-        line += `\n  固定描述（保留视觉特征语义，如为英文须翻译为中文）：${c.detail}`;
+        line += `\n  参考描述（必须翻译为中文写入 detail 字段，不得保留英文）：${c.detail}`;
       if (c.imagePath) line += `（有参考图）`;
       return line;
     })
@@ -149,16 +155,21 @@ export function buildScreenplayPrompt(
 
   const numActs = Math.ceil(duration / 15);
 
+  // 归一化场景 id：非标准格式统一转为 scene-N
   let fixedScenesBlock = "";
   if (scenes && scenes.length > 0) {
-    const sceneLines = scenes
+    const normalizedScenes = scenes.map((s, i) => ({
+      ...s,
+      id: /^scene-\d+$/.test(s.id) ? s.id : `scene-${i + 1}`,
+    }));
+    const sceneLines = normalizedScenes
       .map((s) => {
         const name = (s as { name?: string }).name ?? "";
         const detail = (s as { detail?: string }).detail ?? s.description ?? "";
         return `- [id: ${s.id}]${name ? ` [name: ${name}]` : ""} detail: ${detail}`;
       })
       .join("\n");
-    fixedScenesBlock = `\n固定场景（保留 id 不变；name 和 detail 如为英文须翻译为中文，保留视觉特征语义）：\n${sceneLines}\n\n所有镜头的 "scene" 字段必须引用以下 id 之一（${scenes.map((s) => s.id).join(", ")}）。\n`;
+    fixedScenesBlock = `\n固定场景（使用下列 id；name 和 detail 如为英文必须翻译为中文，不得保留英文原文）：\n${sceneLines}\n\n所有镜头的 "scene" 字段必须引用以下 id 之一（${normalizedScenes.map((s) => s.id).join(", ")}）。\n`;
   }
 
   const userPrompt = `为以下影片生成完整的结构化剧本：
@@ -177,10 +188,10 @@ ${fixedScenesBlock}
 - 总幕数：${numActs} 幕（${numActs} × 15s = ${numActs * 15}s）
 - 在每幕边界插入 transitionHints（每幕最后一个镜头之后，最后一幕除外）
 - 角色描述必须足够详细，适合图像生成 prompt
-- 如果角色已有固定描述，保留其视觉特征语义写入 "detail" 字段；如原文为英文，须翻译为中文
+- 如果角色已有参考描述，必须将其翻译为中文写入 "detail" 字段，不得保留英文原文
 - 动作描述必须视觉化、以摄影机视角为导向
-- 包含 "scenes" 数组，每个独立地点一个条目；id 必须使用 "scene-1", "scene-2"... 格式，与镜头 scene 值匹配
-- 如果提供了固定场景，在 "scenes" 数组和所有镜头 "scene" 字段中使用其精确 id`;
+- 包含 "scenes" 数组，每个独立地点一个条目；使用上方固定场景给出的 id
+- 如果提供了固定场景，使用其给定的 id（已归一化为 scene-N 格式）`;
 
   return [
     { role: "system", content: SYSTEM_PROMPT },
