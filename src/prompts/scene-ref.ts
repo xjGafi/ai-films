@@ -2,11 +2,11 @@ import type { SceneSpec, VideoStyle } from "../types.js";
 
 const STYLE_KEYWORDS: Record<VideoStyle, string> = {
   cinematic:
-    "Photorealistic cinematic rendering. 35mm film quality, natural lighting, realistic materials and textures. Subtle film grain, soft highlight rolloff.",
+    "照片级真实电影渲染。35mm胶片质感，自然光照，真实材质与纹理。细腻胶片颗粒，柔和高光过渡。",
   anime:
-    "Full-color 2D anime style, cel shading, clean line art, vibrant but harmonious color palette. No characters present.",
+    "全彩2D动画风格，赛璐璐着色，干净线稿，鲜艳和谐的色彩搭配。画面中无人物。",
   "3d-pixar":
-    "Pixar 3D animation style. Bright saturated colors, smooth subsurface scattering, render-quality lighting. No characters present.",
+    "皮克斯3D动画风格。明亮饱和色彩，柔滑次表面散射，渲染级光照。画面中无人物。",
 };
 
 export function buildSceneRefPrompt(
@@ -15,15 +15,15 @@ export function buildSceneRefPrompt(
 ): string {
   const styleBlock = STYLE_KEYWORDS[style] ?? STYLE_KEYWORDS["cinematic"];
 
-  return `Empty environment reference image.
+  return `空场景环境参考图。
 
 ${scene.detail}
 
-REQUIREMENTS:
-- No people, no characters, no figures of any kind.
-- Show the environment as an establishing shot — wide angle, full spatial context visible.
-- Consistent with the following visual style: ${styleBlock}
-- Aspect ratio: 16:9
+要求：
+- 画面中不出现任何人物、角色或人形。
+- 以建立镜头呈现环境——广角，完整空间全貌可见。
+- 符合以下视觉风格：${styleBlock}
+- 画面比例：16:9
 
-Do not add text overlays, watermarks, or labels.`;
+不要添加文字水印或标签。`;
 }
