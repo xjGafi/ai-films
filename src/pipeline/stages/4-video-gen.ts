@@ -13,23 +13,8 @@ import {
   pollVideoTask,
   submitVideoTask,
 } from "../../providers/volcengine.js";
-import type {
-  ClipInfo,
-  SceneSpec,
-  Screenplay,
-  StageResult,
-  VideoPromptConfig,
-} from "../../types.js";
+import type { ClipInfo, StageResult, VideoPromptConfig } from "../../types.js";
 import type { ProjectState } from "../state.js";
-
-function getPrimaryScene(shots: Array<{ scene?: string }>): string | undefined {
-  const counts = new Map<string, number>();
-  for (const shot of shots) {
-    if (shot.scene) counts.set(shot.scene, (counts.get(shot.scene) ?? 0) + 1);
-  }
-  if (counts.size === 0) return undefined;
-  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-}
 
 /**
  * Submit a video task (retry on submit failure), then poll for the result
@@ -105,26 +90,6 @@ export async function runVideoGenStage(
 
   fs.mkdirSync(clipsDir, { recursive: true });
   fs.mkdirSync(framesDir, { recursive: true });
-
-  // Build scene ref lookup
-  const scenesDir = path.join(projectDir, "scenes");
-  const sceneRefMap = new Map<string, string>();
-  if (fs.existsSync(scenesDir)) {
-    for (const f of fs.readdirSync(scenesDir)) {
-      if (f.endsWith("-ref.png")) {
-        sceneRefMap.set(f.replace("-ref.png", ""), path.join(scenesDir, f));
-      }
-    }
-  }
-
-  const screenplayRaw = fs.readFileSync(
-    path.join(projectDir, "screenplay.json"),
-    "utf-8",
-  );
-  const screenplay: Screenplay = JSON.parse(screenplayRaw);
-  const sceneSpecMap = new Map<string, SceneSpec>(
-    (screenplay.scenes ?? []).map((s) => [s.id, s]),
-  );
 
   // 1. Read all segment prompt files and sort by ID
   const promptFiles = fs
@@ -215,77 +180,52 @@ export async function runVideoGenStage(
       if (!alreadyHas) {
         // 1. Prepend last frame to referenceImageRefs
         const existingRefs = nextConfig.referenceImageRefs ?? [];
-        const newRefs: string[] = [lastFramePath];
+        nextConfig.referenceImageRefs = [lastFramePath, ...existingRefs];
 
-        // Inject scene ref if Stage 3 did not already include it
-        const nextPrimaryScene = getPrimaryScene(nextConfig.shots);
-        const nextSceneRefPath = nextPrimaryScene
-          ? sceneRefMap.get(nextPrimaryScene)
-          : undefined;
-        const needsSceneRefInjection =
-          nextSceneRefPath !== undefined &&
-          fs.existsSync(nextSceneRefPath) &&
-          !existingRefs.some((r) => r === nextSceneRefPath);
-        if (needsSceneRefInjection) {
-          newRefs.push(nextSceneRefPath);
-        }
-
-        nextConfig.referenceImageRefs = [...newRefs, ...existingRefs];
-
-        // 2. Rebuild referenceDesc with enhanced Image1 + optional Image2, shift existing indices
-        const shiftCount = newRefs.length;
-        const shiftedDesc = nextConfig.referenceDesc.replace(
-          /\[Image(\d+)\]/g,
-          (_, n) => `[Image${Number(n) + shiftCount}]`,
-        );
-        const descParts: string[] = [
-          `[Image1] is the EXACT last frame of the previous clip. Your opening frames MUST match this image — same background, same lighting, same color palette, same character positions, same camera angle. This is the highest-priority reference.`,
-        ];
-        if (needsSceneRefInjection && nextPrimaryScene) {
-          const sceneSpec = sceneSpecMap.get(nextPrimaryScene);
-          const label = sceneSpec?.name ?? nextPrimaryScene;
-          descParts.push(
-            `[Image${descParts.length + 1}] is the reference environment for scene "${label}" — match this exact room layout, wall colors, lighting, and spatial arrangement throughout all shots.`,
+        // 2. 更新 materialDesc — 在素材说明开头插入衔接参考，已有索引 +1
+        if (nextConfig.materialDesc) {
+          // 将已有的 @图片 N 索引全部 +1
+          const shiftedMaterial = nextConfig.materialDesc.replace(
+            /@图片 (\d+)/g,
+            (_, n) => `@图片 ${Number(n) + 1}`,
+          );
+          // 在【素材说明】后插入衔接参考行
+          const insertLine = "@图片 1 作为衔接参考，这是上一段的最后一帧。";
+          nextConfig.materialDesc = shiftedMaterial.replace(
+            "【素材说明】\n",
+            `【素材说明】\n${insertLine}\n`,
           );
         }
-        descParts.push(shiftedDesc);
-        nextConfig.referenceDesc = descParts.join("\n");
 
-        // 3. Replace continuityNote with enhanced scene-aware version
+        // 3. 重建 continuityNote
         const currentLastShot = config.shots[config.shots.length - 1];
         const nextFirstShot = nextConfig.shots[0];
         const sameScene =
           currentLastShot?.scene &&
           nextFirstShot?.scene &&
           currentLastShot.scene === nextFirstShot.scene;
+
         if (sameScene) {
           nextConfig.continuityNote = [
-            "VISUAL CONTINUITY — SAME SCENE:",
-            "[Image1] shows exactly where the previous clip ended. Your opening frames must match:",
-            "• Background: identical walls, furniture, objects, spatial layout",
-            "• Lighting: same direction, intensity, and color temperature",
-            "• Camera: same angle and distance from subjects",
-            "• Characters: same positions and poses as shown in [Image1]",
-            `Action continues from: ${currentLastShot.action}`,
+            "【衔接要求】",
+            "@图片 1 是上一段的结尾画面。开场必须与此画面完全一致：",
+            "• 相同背景、家具、物体、空间布局",
+            "• 相同光线方向、强度和色温",
+            "• 相同镜头角度和距离",
+            "• 角色位置和姿态与参考图一致",
+            `前段结尾动作：${currentLastShot.action}`,
           ].join("\n");
         } else {
           nextConfig.continuityNote = [
-            "VISUAL CONTINUITY — SCENE TRANSITION:",
-            "[Image1] shows the previous clip's ending. Transition smoothly to the new scene while:",
-            "• Maintaining consistent character appearance and costume",
-            "• Using a natural transition (the character walks/turns to reveal the new environment)",
-            `Action continues from: ${currentLastShot?.action ?? "the previous scene"}`,
+            "【衔接要求】",
+            "@图片 1 是上一段的结尾画面。平滑过渡到新场景：",
+            "• 保持角色外观和服装一致",
+            "• 使用自然过渡（角色转身/行走，揭示新环境）",
+            `前段结尾动作：${currentLastShot?.action ?? "上一场景"}`,
           ].join("\n");
         }
 
-        // 4. Append hard continuity rule if not already present
-        const continuityRule =
-          "The first 2 seconds of this clip must be visually continuous with [Image1] — match the background, lighting, color temperature, and character positions exactly.";
-        if (!nextConfig.rules.includes(continuityRule)) {
-          nextConfig.rules.push(continuityRule);
-        }
-
-        // 5. Rebuild prompt and save
+        // 4. 重建 prompt 并保存
         const updatedPrompt = buildSeedancePrompt(nextConfig);
         fs.writeFileSync(
           nextPromptPath,
@@ -293,7 +233,7 @@ export async function runVideoGenStage(
           "utf-8",
         );
         console.log(
-          `[video-gen] injected last frame + continuity layers of segment ${segmentId} into segment ${segmentId + 1} prompts`,
+          `[video-gen] 已注入 segment ${segmentId} 的最后一帧到 segment ${segmentId + 1} 的提示词`,
         );
       }
     }

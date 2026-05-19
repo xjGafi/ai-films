@@ -151,17 +151,22 @@ export interface VideoPromptConfig {
   segmentId: number;
   mode: VideoGenMode;
   transitionStrategy: TransitionStrategy;
-  intent: string;
-  referenceDesc: string;
-  rules: string[];
+  // 旧字段（改为 optional 以兼容已有 segment JSON）
+  intent?: string;
+  referenceDesc?: string;
+  rules?: string[];
   shots: ShotSpec[];
   style: string;
-  cameraNotes: string[];
-  soundDesign: string;
-  negatives: string[];
-  endState: string;
+  cameraNotes?: string[];
+  soundDesign?: string;
+  negatives?: string[];
+  endState?: string;
   continuityNote?: string;
   totalDuration: number;
+  // 新字段（中文分镜格式）
+  materialDesc?: string; // 【素材说明】+【主体定义】+【场景定调】
+  shotSequence?: string; // 【分镜序列】
+  constraints?: string; // 【约束条件】
   // References
   imageRef?: string; // file path for modeA first frame
   lastFrameRef?: string; // file path for modeA last frame

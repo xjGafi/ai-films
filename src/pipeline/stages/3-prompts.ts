@@ -13,14 +13,60 @@ import type {
 import type { ProjectState } from "../state.js";
 
 const SEGMENT_DURATION = 15;
+const MAX_REFERENCE_IMAGES = 10;
+const MAX_CHARACTER_REFS = 4;
+
+const CAMERA_TYPE_MAP: Record<string, string> = {
+  ECU: "大特写",
+  CU: "特写",
+  MCU: "中近景",
+  MS: "中景",
+  MWS: "中全景",
+  WS: "全景",
+  EWS: "大全景",
+  OTS: "过肩",
+  POV: "第一人称",
+  Low: "仰角",
+  High: "俯角",
+  Bird: "鸟瞰",
+  Dutch: "荷兰角",
+};
+
+const CAMERA_MOVE_MAP: Record<string, string> = {
+  tracking: "跟拍",
+  static: "固定镜头",
+  "push in": "缓推",
+  "push-in": "缓推",
+  "pull out": "拉远",
+  "pull-out": "拉远",
+  "pan left": "左摇",
+  "pan right": "右摇",
+  pan: "横摇",
+  "tilt up": "上仰",
+  "tilt down": "下俯",
+  tilt: "俯仰",
+  crane: "摇臂",
+  dolly: "推轨",
+  handheld: "手持",
+  zoom: "变焦",
+  circling: "环绕",
+  orbiting: "环绕",
+  smooth: "平稳",
+  rapid: "快速",
+};
+
+const STYLE_CONSTRAINTS: Record<string, string> = {
+  cinematic: "电影质感，高清，色彩自然，光影柔和，35mm 胶片颗粒感",
+  anime: "2D 日漫风格，赛璐珞着色，动态夸张，表现力丰富",
+  "3d-pixar": "3D 皮克斯动画风格，明亮饱和色彩，夸张表情，电影级体积光",
+};
 
 /**
- * Stage 3: Build video generation prompts for each act.
+ * Stage 3: 为每一段构建中文分镜格式的视频生成提示词。
  *
- * Each act has exactly 9 shots arranged in a 3×3 storyboard grid.
- * Row 1 = shots[0..2], Row 2 = shots[3..5], Row 3 = shots[6..8].
- * Each act → one 15-second Seedance clip.
- * reference_images = [row-1 strip, row-2 strip, row-3 strip, ...character refs]
+ * 每段有 9 个镜头，排列为 3×3 分镜网格。
+ * 每段 → 一个 15 秒 Seedance 片段。
+ * reference_images = [上一段末帧, 分镜图, 角色参考..., 场景参考]
  */
 function getPrimaryScene(shots: ShotSpec[]): string | undefined {
   const counts = new Map<string, number>();
@@ -92,6 +138,12 @@ export async function runPromptsStage(
         ? path.join(framesDir, `segment-${segmentId - 1}-last.png`)
         : undefined;
 
+    const storyboardRawPath = path.join(
+      projectDir,
+      "storyboard",
+      `act-${act.act}-raw.png`,
+    );
+
     const shotsWithAct = act.shots.map((s) => ({ ...s, actNumber: act.act }));
 
     // 过滤出本段实际出场的角色
@@ -107,58 +159,50 @@ export async function runPromptsStage(
       prevLastShot,
     );
 
+    const hasPrevLastFrame =
+      prevLastFramePath !== undefined && fs.existsSync(prevLastFramePath);
+    const hasStoryboard = fs.existsSync(storyboardRawPath);
+
     const referenceImageRefs = assembleReferenceImages(
       actingCharacters,
       charRefMap,
-      prevLastFramePath,
+      hasPrevLastFrame ? prevLastFramePath : undefined,
+      hasStoryboard ? storyboardRawPath : undefined,
       sceneRefPath,
     );
 
-    const hasPrevLastFrame =
-      prevLastFramePath !== undefined && fs.existsSync(prevLastFramePath);
-
-    const referenceDesc = buildReferenceDescription(
+    const { text: materialDesc, labels } = buildMaterialDesc(
+      act,
+      segmentId,
+      screenplay.acts.length,
       actingCharacters,
       charRefMap,
       hasPrevLastFrame,
+      hasStoryboard,
       sceneRefPath,
       sceneName,
     );
 
-    const totalSegments = screenplay.acts.length;
-    const isLastSegment = segmentId === screenplay.acts.length;
-    const intent = buildIntent(act, segmentId, totalSegments);
-    const rules = buildRules(
-      shotsWithAct,
-      actingCharacters,
-      segmentId,
-      hasPrevLastFrame,
-    );
-    const cameraNotes = buildCameraNotes(shotsWithAct);
-    const soundDesign = buildSoundDesign(shotsWithAct);
-    const negatives = buildNegatives(shotsWithAct, state.config.style);
-    const endState = buildEndState(shotsWithAct, isLastSegment);
-    const continuityNote = buildContinuityNote(
-      shotsWithAct,
+    const continuityNote = buildContinuityNoteV2(
       segmentId,
       prevLastShot,
-      hasPrevLastFrame,
+      shotsWithAct,
+      labels.lastFrame,
     );
+
+    const shotSequence = buildShotSequence(act.shots);
+    const constraints = buildConstraints(state.config.style, actingCharacters);
 
     const config: VideoPromptConfig = {
       segmentId,
       mode: "modeB",
       transitionStrategy,
-      intent,
-      referenceDesc,
-      rules,
+      materialDesc,
+      continuityNote,
+      shotSequence,
+      constraints,
       shots: act.shots,
       style: state.config.style,
-      cameraNotes,
-      soundDesign,
-      negatives,
-      endState,
-      continuityNote,
       totalDuration: SEGMENT_DURATION,
       seed: state.config.seed,
     };
@@ -184,9 +228,7 @@ export async function runPromptsStage(
   return { artifacts };
 }
 
-// ── Reference images ──
-
-const MAX_REFERENCE_IMAGES = 9;
+// ── 角色筛选 ──
 
 /**
  * 过滤出在本段镜头中实际出现的角色。
@@ -204,15 +246,17 @@ function getActingCharacters(
   return acting.length > 0 ? acting : characters;
 }
 
+// ── 参考图片组装 ──
+
 function assembleReferenceImages(
   actingCharacters: CharacterSpec[],
   charRefMap: Map<string, string>,
   prevLastFramePath: string | undefined,
+  storyboardRawPath: string | undefined,
   sceneRefPath: string | undefined,
 ): string[] {
   const refs: string[] = [];
 
-  // prevLastFrame 优先 — 模型最需要它来保持跨片段的视觉连续性
   if (
     prevLastFramePath &&
     fs.existsSync(prevLastFramePath) &&
@@ -221,18 +265,29 @@ function assembleReferenceImages(
     refs.push(prevLastFramePath);
   }
 
-  // 然后是本段实际出场的角色
-  for (const char of actingCharacters) {
-    if (refs.length >= MAX_REFERENCE_IMAGES) break;
-    const refPath = charRefMap.get(char.name);
-    if (refPath) refs.push(refPath);
+  if (
+    storyboardRawPath &&
+    fs.existsSync(storyboardRawPath) &&
+    refs.length < MAX_REFERENCE_IMAGES
+  ) {
+    refs.push(storyboardRawPath);
   }
 
-  // 场景参考图放最后
+  let charCount = 0;
+  for (const char of actingCharacters) {
+    if (refs.length >= MAX_REFERENCE_IMAGES) break;
+    if (charCount >= MAX_CHARACTER_REFS) break;
+    const refPath = charRefMap.get(char.name);
+    if (refPath) {
+      refs.push(refPath);
+      charCount++;
+    }
+  }
+
   if (
     sceneRefPath &&
-    refs.length < MAX_REFERENCE_IMAGES &&
-    fs.existsSync(sceneRefPath)
+    fs.existsSync(sceneRefPath) &&
+    refs.length < MAX_REFERENCE_IMAGES
   ) {
     refs.push(sceneRefPath);
   }
@@ -240,49 +295,193 @@ function assembleReferenceImages(
   return refs;
 }
 
-function buildReferenceDescription(
+// ── 素材说明构建 ──
+
+interface RefLabels {
+  lastFrame?: string;
+  storyboard?: string;
+  characters: string[];
+  scene?: string;
+}
+
+function buildMaterialDesc(
+  act: { act: number; name: string },
+  segmentId: number,
+  totalSegments: number,
   actingCharacters: CharacterSpec[],
   charRefMap: Map<string, string>,
   hasPrevLastFrame: boolean,
+  hasStoryboard: boolean,
   sceneRefPath: string | undefined,
   sceneName: string | undefined,
-): string {
-  const parts: string[] = [];
+): { text: string; labels: RefLabels } {
+  const lines: string[] = [];
+  const labels: RefLabels = { characters: [] };
   let imgIdx = 1;
 
-  // prevLastFrame 在数组第一位，所以描述也放第一条
+  lines.push(`本段为第 ${segmentId}/${totalSegments} 段 — ${act.name}。`);
+  lines.push("");
+  lines.push("【素材说明】");
+
   if (hasPrevLastFrame) {
-    parts.push(
-      `[Image${imgIdx}] is the EXACT last frame of the previous clip. Your opening frames MUST match this image — same background, same lighting, same color palette, same character positions, same camera angle. This is the highest-priority continuity reference.`,
+    const label = `@图片 ${imgIdx}`;
+    labels.lastFrame = label;
+    lines.push(`${label} 作为衔接参考，这是上一段的最后一帧。`);
+    imgIdx++;
+  }
+
+  if (hasStoryboard) {
+    const label = `@图片 ${imgIdx}`;
+    labels.storyboard = label;
+    lines.push(
+      `${label} 作为分镜参考，这是本段 9 个镜头的 3×3 分镜图，各格构图按从左到右、从上到下顺序对应镜头 1–9。`,
     );
     imgIdx++;
   }
 
-  // 本段实际出场的角色
+  let charCount = 0;
   for (const char of actingCharacters) {
-    if (imgIdx > MAX_REFERENCE_IMAGES) break;
-    const desc = char.detail;
+    if (charCount >= MAX_CHARACTER_REFS) break;
     if (charRefMap.has(char.name)) {
-      parts.push(`[Image${imgIdx}] is ${char.name}: ${desc}`);
+      const label = `@图片 ${imgIdx}`;
+      labels.characters.push(label);
+      lines.push(`${label} 作为角色参考（${char.name}）。`);
       imgIdx++;
-    } else {
-      parts.push(`${char.name}: ${desc}`);
+      charCount++;
     }
   }
 
-  // 场景参考图放最后
   if (sceneRefPath && fs.existsSync(sceneRefPath)) {
-    const label = sceneName ?? "this scene";
-    parts.push(
-      `[Image${imgIdx}] is the reference environment for scene "${label}" — match this exact room layout, wall colors, lighting, and spatial arrangement throughout all shots.`,
-    );
+    const label = `@图片 ${imgIdx}`;
+    labels.scene = label;
+    lines.push(`${label} 作为场景参考（${sceneName ?? "本场景"}）。`);
     imgIdx++;
   }
 
-  return parts.join("\n");
+  lines.push("");
+  lines.push("【主体定义】");
+  charCount = 0;
+  let charImgStart = (hasPrevLastFrame ? 1 : 0) + (hasStoryboard ? 1 : 0) + 1;
+  for (const char of actingCharacters) {
+    if (charCount >= MAX_CHARACTER_REFS) break;
+    if (charRefMap.has(char.name)) {
+      const briefDesc = char.detail ? char.detail.slice(0, 40) : char.name;
+      lines.push(
+        `将 @图片 ${charImgStart} 中的${briefDesc}定义为${char.name}。`,
+      );
+      charImgStart++;
+      charCount++;
+    }
+  }
+
+  if (actingCharacters.length > MAX_CHARACTER_REFS) {
+    for (let i = MAX_CHARACTER_REFS; i < actingCharacters.length; i++) {
+      const char = actingCharacters[i];
+      lines.push(
+        `${char.name}：${char.detail ?? "（无描述）"}（无参考图，仅文字描述）。`,
+      );
+    }
+  }
+
+  if (sceneName) {
+    lines.push("");
+    lines.push("【场景定调】");
+    lines.push(
+      `场景为「${sceneName}」${labels.scene ? `，匹配 ${labels.scene} 的空间布局、光线方向和整体氛围` : ""}。`,
+    );
+  }
+
+  return { text: lines.join("\n"), labels };
 }
 
-// ── Transition strategy ──
+// ── 分镜序列构建 ──
+
+function buildShotSequence(shots: ShotSpec[]): string {
+  const lines: string[] = ["【分镜序列】"];
+
+  for (let i = 0; i < shots.length; i++) {
+    const shot = shots[i];
+    const idx = i + 1;
+
+    const typeZh = CAMERA_TYPE_MAP[shot.type] ?? shot.type;
+    const cameraZh =
+      CAMERA_MOVE_MAP[shot.camera] ??
+      CAMERA_MOVE_MAP[shot.camera?.split(" ")[0] ?? ""] ??
+      shot.camera;
+
+    lines.push(`镜头 ${idx}：${typeZh}${cameraZh}，${shot.action}`);
+  }
+
+  return lines.join("\n");
+}
+
+// ── 约束条件构建 ──
+
+function buildConstraints(
+  style: string,
+  actingCharacters: CharacterSpec[],
+): string {
+  const lines: string[] = ["【约束条件】"];
+
+  const charNames = actingCharacters.map((c) => c.name);
+  if (charNames.length > 0) {
+    lines.push(
+      `• 全程保持${charNames.join("、")}的外观一致——面部特征、服装、体型不得漂移`,
+    );
+  }
+  lines.push("• 保持无字幕，避免生成任何文字或字幕");
+  lines.push("• 不要生成水印或 Logo");
+  lines.push("• 不要引入未定义的角色");
+  if (actingCharacters.length > 1) {
+    lines.push("• 视频全程禁止出现外形、着装完全一致的人物（禁止双胞胎效果）");
+  }
+  lines.push("• 人物面部稳定不变形，动作自然流畅，无卡顿无闪烁");
+
+  const styleConstraint =
+    STYLE_CONSTRAINTS[style] ?? STYLE_CONSTRAINTS.cinematic;
+  lines.push(`• 风格：${styleConstraint}`);
+
+  return lines.join("\n");
+}
+
+// ── 衔接要求构建 ──
+
+function buildContinuityNoteV2(
+  segmentId: number,
+  prevLastShot: (ShotSpec & { actNumber: number }) | undefined,
+  shots: Array<ShotSpec & { actNumber: number }>,
+  lastFrameLabel: string | undefined,
+): string | undefined {
+  if (segmentId === 1 || !prevLastShot || !lastFrameLabel) return undefined;
+
+  const firstShot = shots[0];
+  const sameScene =
+    firstShot?.scene &&
+    prevLastShot.scene &&
+    firstShot.scene === prevLastShot.scene;
+
+  const lines: string[] = ["【衔接要求】"];
+
+  if (sameScene) {
+    lines.push(
+      `${lastFrameLabel} 是上一段的结尾画面。开场必须与此画面完全一致：`,
+    );
+    lines.push("• 相同背景、家具、物体、空间布局");
+    lines.push("• 相同光线方向、强度和色温");
+    lines.push("• 相同镜头角度和距离");
+    lines.push("• 角色位置和姿态与参考图一致");
+    lines.push(`前段结尾动作：${prevLastShot.action}`);
+  } else {
+    lines.push(`${lastFrameLabel} 是上一段的结尾画面。平滑过渡到新场景：`);
+    lines.push("• 保持角色外观和服装一致");
+    lines.push("• 使用自然过渡（角色转身/行走，揭示新环境）");
+    lines.push(`前段结尾动作：${prevLastShot.action}`);
+  }
+
+  return lines.join("\n");
+}
+
+// ── 转场策略 ──
 
 function determineTransitionStrategy(
   shots: Array<ShotSpec & { actNumber: number }>,
@@ -330,181 +529,4 @@ function determineTransitionStrategy(
   if (isFastPace) return "hard_cut";
 
   return "continuity_crossfade";
-}
-
-// ── Prompt component builders ──
-
-function buildIntent(
-  act: { act: number; name: string },
-  segmentId: number,
-  totalSegments: number,
-): string {
-  return `Segment ${segmentId} of ${totalSegments} — Act ${act.act} (${act.name}).`;
-}
-
-function buildRules(
-  shots: Array<ShotSpec & { actNumber: number }>,
-  actingCharacters: CharacterSpec[],
-  segmentId: number,
-  hasPrevLastFrame: boolean,
-): string[] {
-  const rules: string[] = [];
-
-  // 只列出本段实际出场的角色
-  const charNames = actingCharacters.map((c) => c.name);
-  if (charNames.length > 0) {
-    rules.push(
-      `Maintain exact appearance of ${charNames.join(", ")} throughout all shots — no drift in facial features, clothing, or proportions.`,
-    );
-  }
-
-  const scenes = [...new Set(shots.map((s) => s.scene).filter(Boolean))];
-  if (scenes.length === 1) {
-    rules.push(
-      `All shots take place in the same scene (${scenes[0]}). Keep environment, lighting, and props consistent.`,
-    );
-  } else if (scenes.length > 1) {
-    rules.push(
-      `Scene transitions within this segment must be smooth and motivated by the narrative.`,
-    );
-  }
-
-  const paceCounts = new Map<string, number>();
-  for (const shot of shots) {
-    const pace = shot.pace ?? "medium";
-    paceCounts.set(pace, (paceCounts.get(pace) ?? 0) + 1);
-  }
-  const dominantPace =
-    [...paceCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "medium";
-  if (dominantPace === "fast") {
-    rules.push(
-      "Urgent rhythm — quick cuts, whip transitions, no pauses between beats.",
-    );
-  } else if (dominantPace === "slow") {
-    rules.push(
-      "Slow, contemplative pacing — linger on each shot, smooth camera movements, let moments breathe.",
-    );
-  }
-
-  if (segmentId > 1 && hasPrevLastFrame) {
-    rules.push(
-      `The first 2 seconds of this clip must be visually continuous with [Image1] — match the background, lighting, color temperature, and character positions exactly.`,
-    );
-  }
-
-  return rules;
-}
-
-function buildCameraNotes(
-  shots: Array<ShotSpec & { actNumber: number }>,
-): string[] {
-  return shots
-    .map((shot) => {
-      const parts: string[] = [];
-      if (shot.type) parts.push(shot.type);
-      if (shot.camera) parts.push(shot.camera);
-      return parts.length === 0 ? null : parts.join(" — ");
-    })
-    .filter((note): note is string => note !== null);
-}
-
-function buildSoundDesign(
-  shots: Array<ShotSpec & { actNumber: number }>,
-): string {
-  const emotions = shots.map((s) => s.emotion).filter(Boolean);
-  if (emotions.length === 0) {
-    return "Subtle ambient soundscape matching the visual mood. Natural environmental audio.";
-  }
-  return `Sound design follows emotional arc: ${emotions.join(" → ")}. Ambient sounds match the scene environment.`;
-}
-
-function buildNegatives(
-  shots: Array<ShotSpec & { actNumber: number }>,
-  style: string,
-): string[] {
-  // 3d-pixar 风格本身就是 3D，禁止 2D 扁平风格；其他风格禁止 3D/卡通渲染
-  const renderingNegative =
-    style === "3d-pixar"
-      ? "use flat 2D cartoon style"
-      : "use cartoon or 3D rendering unless specified in style";
-
-  const negatives: string[] = [
-    "add production watermarks, subtitles, or captions not described in the shots",
-    "introduce characters not described above",
-    "skip or reorder any shot",
-    renderingNegative,
-  ];
-  if (shots.some((s) => s.pace === "fast")) {
-    negatives.push("slow down the action — maintain the fast rhythm");
-  }
-  return negatives;
-}
-
-function buildEndState(
-  shots: Array<ShotSpec & { actNumber: number }>,
-  isLastSegment: boolean,
-): string {
-  const lastShot = shots[shots.length - 1];
-  if (!lastShot) return "Scene fades to black.";
-  let desc = lastShot.action;
-  if (lastShot.emotion) desc += ` Emotion: ${lastShot.emotion}.`;
-  // 最后一段不需要「下一片段继续」的提示
-  if (isLastSegment) {
-    desc += " This is the final scene. The film ends here.";
-  } else {
-    desc += " The next clip will continue from this state.";
-  }
-  return desc;
-}
-
-function buildContinuityNote(
-  shots: Array<ShotSpec & { actNumber: number }>,
-  segmentId: number,
-  prevLastShot: (ShotSpec & { actNumber: number }) | undefined,
-  hasPrevLastFrame: boolean,
-): string | undefined {
-  if (segmentId === 1 || !prevLastShot) return undefined;
-
-  const sameScene =
-    shots[0]?.scene &&
-    prevLastShot.scene &&
-    shots[0].scene === prevLastShot.scene;
-
-  if (hasPrevLastFrame && sameScene) {
-    return [
-      "VISUAL CONTINUITY — SAME SCENE:",
-      "[Image1] shows exactly where the previous clip ended. Your opening frames must match:",
-      "• Background: identical walls, furniture, objects, spatial layout",
-      "• Lighting: same direction, intensity, and color temperature",
-      "• Camera: same angle and distance from subjects",
-      "• Characters: same positions and poses as shown in [Image1]",
-      `Action continues from: ${prevLastShot.action}`,
-    ].join("\n");
-  }
-
-  if (hasPrevLastFrame && !sameScene) {
-    return [
-      "VISUAL CONTINUITY — SCENE TRANSITION:",
-      "[Image1] shows the previous clip's ending. Transition smoothly to the new scene while:",
-      "• Maintaining consistent character appearance and costume",
-      "• Using a natural transition (the character walks/turns to reveal the new environment)",
-      `Action continues from: ${prevLastShot.action}`,
-    ].join("\n");
-  }
-
-  // Fallback: no last frame available (first pipeline run, stage 3 pass)
-  const parts = [
-    "This clip must feel like a direct continuation of the previous clip.",
-    `Start with: ${prevLastShot.action}`,
-  ];
-  if (sameScene) {
-    parts.push(
-      "Maintain the same scene, same lighting, same camera distance, and same emotional tone.",
-    );
-  } else {
-    parts.push(
-      "Transition smoothly to the new scene while maintaining character appearance.",
-    );
-  }
-  return parts.join(" ");
 }
