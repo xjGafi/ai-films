@@ -141,7 +141,7 @@ export function buildScreenplayPrompt(
     .map((c) => {
       let line = `- ${c.name}`;
       if (c.detail)
-        line += `\n  固定描述（必须原样使用，不得修改）：${c.detail}`;
+        line += `\n  固定描述（保留视觉特征语义，如为英文须翻译为中文）：${c.detail}`;
       if (c.imagePath) line += `（有参考图）`;
       return line;
     })
@@ -158,7 +158,7 @@ export function buildScreenplayPrompt(
         return `- [id: ${s.id}]${name ? ` [name: ${name}]` : ""} detail: ${detail}`;
       })
       .join("\n");
-    fixedScenesBlock = `\n固定场景（必须原样使用——相同 id、相同 name、相同 detail——不得重命名或改写）：\n${sceneLines}\n\n所有镜头的 "scene" 字段必须引用以下 id 之一（${scenes.map((s) => s.id).join(", ")}）。\n`;
+    fixedScenesBlock = `\n固定场景（保留 id 不变；name 和 detail 如为英文须翻译为中文，保留视觉特征语义）：\n${sceneLines}\n\n所有镜头的 "scene" 字段必须引用以下 id 之一（${scenes.map((s) => s.id).join(", ")}）。\n`;
   }
 
   const userPrompt = `为以下影片生成完整的结构化剧本：
@@ -177,7 +177,7 @@ ${fixedScenesBlock}
 - 总幕数：${numActs} 幕（${numActs} × 15s = ${numActs * 15}s）
 - 在每幕边界插入 transitionHints（每幕最后一个镜头之后，最后一幕除外）
 - 角色描述必须足够详细，适合图像生成 prompt
-- 如果角色已有固定描述，将其逐字复制到 "detail" 字段——不要改写或重新生成
+- 如果角色已有固定描述，保留其视觉特征语义写入 "detail" 字段；如原文为英文，须翻译为中文
 - 动作描述必须视觉化、以摄影机视角为导向
 - 包含 "scenes" 数组，每个独立地点一个条目；id 必须使用 "scene-1", "scene-2"... 格式，与镜头 scene 值匹配
 - 如果提供了固定场景，在 "scenes" 数组和所有镜头 "scene" 字段中使用其精确 id`;
