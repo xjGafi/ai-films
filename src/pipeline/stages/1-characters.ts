@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import pLimit from "p-limit";
-import { buildCharacterSheetPrompt } from "../../prompts/character-sheet.js";
+import { buildCharacterRefPrompt } from "../../prompts/character-sheet.js";
 import { buildSceneRefPrompt } from "../../prompts/scene-ref.js";
 import { generateImage, saveBuffer } from "../../providers/volcengine.js";
 import type { Screenplay, StageResult, VideoStyle } from "../../types.js";
@@ -36,26 +36,51 @@ export async function runCharactersStage(
 
   const tasks: Promise<void>[] = [];
 
-  // 角色图任务
+  // 角色图任务：每个角色生成正面和 3/4 两张参考图
   for (const char of screenplay.characters) {
-    const refFileName = `${char.name}-ref.png`;
-    const outPath = path.join(charsDir, refFileName);
-    const artifactKey = `characters/${refFileName}`;
-
     const providedImagePath = configCharMap.get(char.name);
 
     if (providedImagePath && fs.existsSync(providedImagePath)) {
-      fs.copyFileSync(providedImagePath, outPath);
-      artifacts[artifactKey] = `characters/${refFileName}`;
+      // 用户提供了图片，仅作为正面参考图复制
+      const frontFileName = `${char.name}-ref-front.png`;
+      const frontPath = path.join(charsDir, frontFileName);
+      fs.copyFileSync(providedImagePath, frontPath);
+      artifacts[`characters/${frontFileName}`] = `characters/${frontFileName}`;
     } else {
+      // 生成正面全身图
+      const frontFileName = `${char.name}-ref-front.png`;
+      const frontPath = path.join(charsDir, frontFileName);
       tasks.push(
         limit(async () => {
-          const prompt = buildCharacterSheetPrompt(char, state.config.style);
+          const prompt = buildCharacterRefPrompt(
+            char,
+            state.config.style,
+            "front",
+          );
           const buffer = await generateImage(prompt, {
             seed: state.config.seed,
           });
-          saveBuffer(buffer, outPath);
-          artifacts[artifactKey] = `characters/${refFileName}`;
+          saveBuffer(buffer, frontPath);
+          artifacts[`characters/${frontFileName}`] =
+            `characters/${frontFileName}`;
+        }),
+      );
+
+      // 生成 3/4 侧面全身图
+      const tqFileName = `${char.name}-ref-34.png`;
+      const tqPath = path.join(charsDir, tqFileName);
+      tasks.push(
+        limit(async () => {
+          const prompt = buildCharacterRefPrompt(
+            char,
+            state.config.style,
+            "three-quarter",
+          );
+          const buffer = await generateImage(prompt, {
+            seed: state.config.seed,
+          });
+          saveBuffer(buffer, tqPath);
+          artifacts[`characters/${tqFileName}`] = `characters/${tqFileName}`;
         }),
       );
     }

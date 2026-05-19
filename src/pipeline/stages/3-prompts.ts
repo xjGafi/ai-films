@@ -86,11 +86,19 @@ export async function runPromptsStage(
   const screenplay: Screenplay = JSON.parse(raw);
 
   const charactersDir = path.join(projectDir, "characters");
-  const charRefMap = new Map<string, string>();
+  const charRefMap = new Map<string, string[]>();
   for (const char of screenplay.characters) {
-    const refPath = path.join(charactersDir, `${char.name}-ref.png`);
-    if (fs.existsSync(refPath)) {
-      charRefMap.set(char.name, refPath);
+    const frontPath = path.join(charactersDir, `${char.name}-ref-front.png`);
+    const threeFourPath = path.join(charactersDir, `${char.name}-ref-34.png`);
+    if (fs.existsSync(frontPath) && fs.existsSync(threeFourPath)) {
+      // 新格式：正面 + 3/4 侧面两张参考图
+      charRefMap.set(char.name, [frontPath, threeFourPath]);
+    } else {
+      // 兼容旧格式：单张模型表参考图
+      const legacyPath = path.join(charactersDir, `${char.name}-ref.png`);
+      if (fs.existsSync(legacyPath)) {
+        charRefMap.set(char.name, [legacyPath]);
+      }
     }
   }
 
@@ -250,7 +258,7 @@ function getActingCharacters(
 
 function assembleReferenceImages(
   actingCharacters: CharacterSpec[],
-  charRefMap: Map<string, string>,
+  charRefMap: Map<string, string[]>,
   prevLastFramePath: string | undefined,
   storyboardRawPath: string | undefined,
   sceneRefPath: string | undefined,
@@ -273,14 +281,18 @@ function assembleReferenceImages(
     refs.push(storyboardRawPath);
   }
 
-  let charCount = 0;
+  let charImageCount = 0;
   for (const char of actingCharacters) {
     if (refs.length >= MAX_REFERENCE_IMAGES) break;
-    if (charCount >= MAX_CHARACTER_REFS) break;
-    const refPath = charRefMap.get(char.name);
-    if (refPath) {
-      refs.push(refPath);
-      charCount++;
+    if (charImageCount >= MAX_CHARACTER_REFS) break;
+    const refPaths = charRefMap.get(char.name);
+    if (refPaths) {
+      for (const p of refPaths) {
+        if (refs.length >= MAX_REFERENCE_IMAGES) break;
+        if (charImageCount >= MAX_CHARACTER_REFS) break;
+        refs.push(p);
+        charImageCount++;
+      }
     }
   }
 
@@ -309,7 +321,7 @@ function buildMaterialDesc(
   segmentId: number,
   totalSegments: number,
   actingCharacters: CharacterSpec[],
-  charRefMap: Map<string, string>,
+  charRefMap: Map<string, string[]>,
   hasPrevLastFrame: boolean,
   hasStoryboard: boolean,
   sceneRefPath: string | undefined,
@@ -339,15 +351,32 @@ function buildMaterialDesc(
     imgIdx++;
   }
 
-  let charCount = 0;
+  let charImageCount = 0;
   for (const char of actingCharacters) {
-    if (charCount >= MAX_CHARACTER_REFS) break;
-    if (charRefMap.has(char.name)) {
-      const label = `@图片 ${imgIdx}`;
-      labels.characters.push(label);
-      lines.push(`${label} 作为角色参考（${char.name}）。`);
-      imgIdx++;
-      charCount++;
+    if (charImageCount >= MAX_CHARACTER_REFS) break;
+    const refPaths = charRefMap.get(char.name);
+    if (refPaths) {
+      if (refPaths.length === 2) {
+        // 正面 + 3/4 侧面两张参考图
+        if (charImageCount + 2 > MAX_CHARACTER_REFS) break;
+        const labelFront = `@图片 ${imgIdx}`;
+        labels.characters.push(labelFront);
+        lines.push(`${labelFront} 作为角色正面参考（${char.name}）。`);
+        imgIdx++;
+        charImageCount++;
+        const label34 = `@图片 ${imgIdx}`;
+        labels.characters.push(label34);
+        lines.push(`${label34} 作为角色侧面参考（${char.name}）。`);
+        imgIdx++;
+        charImageCount++;
+      } else {
+        // 兼容旧格式：单张参考图
+        const label = `@图片 ${imgIdx}`;
+        labels.characters.push(label);
+        lines.push(`${label} 作为角色参考（${char.name}）。`);
+        imgIdx++;
+        charImageCount++;
+      }
     }
   }
 
@@ -360,27 +389,50 @@ function buildMaterialDesc(
 
   lines.push("");
   lines.push("【主体定义】");
-  charCount = 0;
   let charImgStart = (hasPrevLastFrame ? 1 : 0) + (hasStoryboard ? 1 : 0) + 1;
+  let defCharImageCount = 0;
   for (const char of actingCharacters) {
-    if (charCount >= MAX_CHARACTER_REFS) break;
-    if (charRefMap.has(char.name)) {
-      const briefDesc = char.detail ? char.detail.slice(0, 40) : char.name;
-      lines.push(
-        `将 @图片 ${charImgStart} 中的${briefDesc}定义为${char.name}。`,
-      );
-      charImgStart++;
-      charCount++;
+    if (defCharImageCount >= MAX_CHARACTER_REFS) break;
+    const refPaths = charRefMap.get(char.name);
+    if (refPaths) {
+      const briefDesc = char.detail || char.name;
+      if (refPaths.length === 2) {
+        if (defCharImageCount + 2 > MAX_CHARACTER_REFS) break;
+        lines.push(
+          `将 @图片 ${charImgStart} 和 @图片 ${charImgStart + 1} 中的${briefDesc}定义为${char.name}。`,
+        );
+        charImgStart += 2;
+        defCharImageCount += 2;
+      } else {
+        lines.push(
+          `将 @图片 ${charImgStart} 中的${briefDesc}定义为${char.name}。`,
+        );
+        charImgStart++;
+        defCharImageCount++;
+      }
     }
   }
 
-  if (actingCharacters.length > MAX_CHARACTER_REFS) {
-    for (let i = MAX_CHARACTER_REFS; i < actingCharacters.length; i++) {
-      const char = actingCharacters[i];
+  // 超出参考图限制的角色，仅用文字描述
+  const charsWithRefs = actingCharacters.filter((c) => charRefMap.has(c.name));
+  const charsWithoutRefs = actingCharacters.filter(
+    (c) => !charRefMap.has(c.name),
+  );
+  for (const char of charsWithoutRefs) {
+    lines.push(
+      `${char.name}：${char.detail ?? "（无描述）"}（无参考图，仅文字描述）。`,
+    );
+  }
+  // 有参考图但因超出限制而未纳入的角色
+  let countedImages = 0;
+  for (const char of charsWithRefs) {
+    const refPaths = charRefMap.get(char.name) ?? [];
+    if (countedImages + refPaths.length > MAX_CHARACTER_REFS) {
       lines.push(
         `${char.name}：${char.detail ?? "（无描述）"}（无参考图，仅文字描述）。`,
       );
     }
+    countedImages += refPaths.length;
   }
 
   if (sceneName) {
