@@ -86,19 +86,11 @@ export async function runPromptsStage(
   const screenplay: Screenplay = JSON.parse(raw);
 
   const charactersDir = path.join(projectDir, "characters");
-  const charRefMap = new Map<string, string[]>();
+  const charRefMap = new Map<string, string>();
   for (const char of screenplay.characters) {
     const frontPath = path.join(charactersDir, `${char.name}-ref-front.png`);
-    const threeFourPath = path.join(charactersDir, `${char.name}-ref-34.png`);
-    if (fs.existsSync(frontPath) && fs.existsSync(threeFourPath)) {
-      // 新格式：正面 + 3/4 侧面两张参考图
-      charRefMap.set(char.name, [frontPath, threeFourPath]);
-    } else {
-      // 兼容旧格式：单张模型表参考图
-      const legacyPath = path.join(charactersDir, `${char.name}-ref.png`);
-      if (fs.existsSync(legacyPath)) {
-        charRefMap.set(char.name, [legacyPath]);
-      }
+    if (fs.existsSync(frontPath)) {
+      charRefMap.set(char.name, frontPath);
     }
   }
 
@@ -199,7 +191,11 @@ export async function runPromptsStage(
     );
 
     const shotSequence = buildShotSequence(act.shots);
-    const constraints = buildConstraints(state.config.style, actingCharacters);
+    const constraints = buildConstraints(
+      state.config.style,
+      actingCharacters,
+      labels.characters,
+    );
 
     const config: VideoPromptConfig = {
       segmentId,
@@ -248,9 +244,15 @@ function getActingCharacters(
   characters: CharacterSpec[],
 ): CharacterSpec[] {
   const allText = shots.map((s) => `${s.action} ${s.title ?? ""}`).join(" ");
-  const acting = characters.filter(
-    (char) => allText.includes(char.name) || allText.includes(`(${char.id})`),
-  );
+  const acting = characters.filter((char) => {
+    // 角色名可能含特殊字符（如 @ 符号），取 @ 前部分做子串匹配
+    const baseName = char.name.split("@")[0];
+    if (allText.includes(char.name) || allText.includes(baseName)) return true;
+    // 支持英文括号 (id) 和中文括号 （id）
+    if (allText.includes(`(${char.id})`) || allText.includes(`（${char.id}）`))
+      return true;
+    return false;
+  });
   return acting.length > 0 ? acting : characters;
 }
 
@@ -258,7 +260,7 @@ function getActingCharacters(
 
 function assembleReferenceImages(
   actingCharacters: CharacterSpec[],
-  charRefMap: Map<string, string[]>,
+  charRefMap: Map<string, string>,
   prevLastFramePath: string | undefined,
   storyboardRawPath: string | undefined,
   sceneRefPath: string | undefined,
@@ -273,27 +275,24 @@ function assembleReferenceImages(
     refs.push(prevLastFramePath);
   }
 
+  // 角色参考图优先于分镜图，避免分镜中的草图人物干扰角色锚定
+  let charCount = 0;
+  for (const char of actingCharacters) {
+    if (refs.length >= MAX_REFERENCE_IMAGES) break;
+    if (charCount >= MAX_CHARACTER_REFS) break;
+    const refPath = charRefMap.get(char.name);
+    if (refPath) {
+      refs.push(refPath);
+      charCount++;
+    }
+  }
+
   if (
     storyboardRawPath &&
     fs.existsSync(storyboardRawPath) &&
     refs.length < MAX_REFERENCE_IMAGES
   ) {
     refs.push(storyboardRawPath);
-  }
-
-  let charImageCount = 0;
-  for (const char of actingCharacters) {
-    if (refs.length >= MAX_REFERENCE_IMAGES) break;
-    if (charImageCount >= MAX_CHARACTER_REFS) break;
-    const refPaths = charRefMap.get(char.name);
-    if (refPaths) {
-      for (const p of refPaths) {
-        if (refs.length >= MAX_REFERENCE_IMAGES) break;
-        if (charImageCount >= MAX_CHARACTER_REFS) break;
-        refs.push(p);
-        charImageCount++;
-      }
-    }
   }
 
   if (
@@ -321,7 +320,7 @@ function buildMaterialDesc(
   segmentId: number,
   totalSegments: number,
   actingCharacters: CharacterSpec[],
-  charRefMap: Map<string, string[]>,
+  charRefMap: Map<string, string>,
   hasPrevLastFrame: boolean,
   hasStoryboard: boolean,
   sceneRefPath: string | undefined,
@@ -336,52 +335,36 @@ function buildMaterialDesc(
   lines.push("【素材说明】");
 
   if (hasPrevLastFrame) {
-    const label = `@图片 ${imgIdx}`;
+    const label = `@图片${imgIdx}`;
     labels.lastFrame = label;
     lines.push(`${label} 作为衔接参考，这是上一段的最后一帧。`);
     imgIdx++;
   }
 
+  // 角色参考图优先于分镜图
+  let charCount = 0;
+  for (const char of actingCharacters) {
+    if (charCount >= MAX_CHARACTER_REFS) break;
+    if (charRefMap.has(char.name)) {
+      const label = `@图片${imgIdx}`;
+      labels.characters.push(label);
+      lines.push(`${label} 作为角色参考（${char.name}）。`);
+      imgIdx++;
+      charCount++;
+    }
+  }
+
   if (hasStoryboard) {
-    const label = `@图片 ${imgIdx}`;
+    const label = `@图片${imgIdx}`;
     labels.storyboard = label;
     lines.push(
-      `${label} 作为分镜参考，这是本段 9 个镜头的 3×3 分镜图，各格构图按从左到右、从上到下顺序对应镜头 1–9。`,
+      `${label} 作为分镜参考，仅参考构图和运镜，不要参考其中的人物形象。`,
     );
     imgIdx++;
   }
 
-  let charImageCount = 0;
-  for (const char of actingCharacters) {
-    if (charImageCount >= MAX_CHARACTER_REFS) break;
-    const refPaths = charRefMap.get(char.name);
-    if (refPaths) {
-      if (refPaths.length === 2) {
-        // 正面 + 3/4 侧面两张参考图
-        if (charImageCount + 2 > MAX_CHARACTER_REFS) break;
-        const labelFront = `@图片 ${imgIdx}`;
-        labels.characters.push(labelFront);
-        lines.push(`${labelFront} 作为角色正面参考（${char.name}）。`);
-        imgIdx++;
-        charImageCount++;
-        const label34 = `@图片 ${imgIdx}`;
-        labels.characters.push(label34);
-        lines.push(`${label34} 作为角色侧面参考（${char.name}）。`);
-        imgIdx++;
-        charImageCount++;
-      } else {
-        // 兼容旧格式：单张参考图
-        const label = `@图片 ${imgIdx}`;
-        labels.characters.push(label);
-        lines.push(`${label} 作为角色参考（${char.name}）。`);
-        imgIdx++;
-        charImageCount++;
-      }
-    }
-  }
-
   if (sceneRefPath && fs.existsSync(sceneRefPath)) {
-    const label = `@图片 ${imgIdx}`;
+    const label = `@图片${imgIdx}`;
     labels.scene = label;
     lines.push(`${label} 作为场景参考（${sceneName ?? "本场景"}）。`);
     imgIdx++;
@@ -389,50 +372,36 @@ function buildMaterialDesc(
 
   lines.push("");
   lines.push("【主体定义】");
-  let charImgStart = (hasPrevLastFrame ? 1 : 0) + (hasStoryboard ? 1 : 0) + 1;
-  let defCharImageCount = 0;
+  charCount = 0;
+  let charLabelIdx = 0;
   for (const char of actingCharacters) {
-    if (defCharImageCount >= MAX_CHARACTER_REFS) break;
-    const refPaths = charRefMap.get(char.name);
-    if (refPaths) {
-      const briefDesc = char.detail || char.name;
-      if (refPaths.length === 2) {
-        if (defCharImageCount + 2 > MAX_CHARACTER_REFS) break;
-        lines.push(
-          `将 @图片 ${charImgStart} 和 @图片 ${charImgStart + 1} 中的${briefDesc}定义为${char.name}。`,
-        );
-        charImgStart += 2;
-        defCharImageCount += 2;
-      } else {
-        lines.push(
-          `将 @图片 ${charImgStart} 中的${briefDesc}定义为${char.name}。`,
-        );
-        charImgStart++;
-        defCharImageCount++;
-      }
+    if (charCount >= MAX_CHARACTER_REFS) break;
+    if (charRefMap.has(char.name)) {
+      const desc = char.detail || char.name;
+      const charLabel = labels.characters[charLabelIdx];
+      lines.push(
+        `将 ${charLabel} 中的${desc}定义为${char.name}。视频全程严格匹配该图的外观，不参考其他图中的人物。`,
+      );
+      charLabelIdx++;
+      charCount++;
     }
   }
 
-  // 超出参考图限制的角色，仅用文字描述
-  const charsWithRefs = actingCharacters.filter((c) => charRefMap.has(c.name));
-  const charsWithoutRefs = actingCharacters.filter(
-    (c) => !charRefMap.has(c.name),
-  );
-  for (const char of charsWithoutRefs) {
-    lines.push(
-      `${char.name}：${char.detail ?? "（无描述）"}（无参考图，仅文字描述）。`,
-    );
-  }
-  // 有参考图但因超出限制而未纳入的角色
-  let countedImages = 0;
-  for (const char of charsWithRefs) {
-    const refPaths = charRefMap.get(char.name) ?? [];
-    if (countedImages + refPaths.length > MAX_CHARACTER_REFS) {
+  // 超出参考图限制或没有参考图的角色，仅用文字描述
+  let counted = 0;
+  for (const char of actingCharacters) {
+    if (charRefMap.has(char.name)) {
+      counted++;
+      if (counted > MAX_CHARACTER_REFS) {
+        lines.push(
+          `${char.name}：${char.detail ?? "（无描述）"}（无参考图，仅文字描述）。`,
+        );
+      }
+    } else {
       lines.push(
         `${char.name}：${char.detail ?? "（无描述）"}（无参考图，仅文字描述）。`,
       );
     }
-    countedImages += refPaths.length;
   }
 
   if (sceneName) {
@@ -472,14 +441,21 @@ function buildShotSequence(shots: ShotSpec[]): string {
 function buildConstraints(
   style: string,
   actingCharacters: CharacterSpec[],
+  characterLabels: string[],
 ): string {
   const lines: string[] = ["【约束条件】"];
 
-  const charNames = actingCharacters.map((c) => c.name);
-  if (charNames.length > 0) {
-    lines.push(
-      `• 全程保持${charNames.join("、")}的外观一致——面部特征、服装、体型不得漂移`,
-    );
+  // 显式引用角色参考图强化一致性
+  const charsWithLabels = actingCharacters
+    .filter((_, i) => i < characterLabels.length)
+    .map((c, i) => ({ name: c.name, label: characterLabels[i] }));
+
+  if (charsWithLabels.length > 0) {
+    for (const { name, label } of charsWithLabels) {
+      lines.push(
+        `• 全程基于 ${label} 保持${name}的面部、发型、服装、体型完全一致，不得漂移`,
+      );
+    }
   }
   lines.push("• 保持无字幕，避免生成任何文字或字幕");
   lines.push("• 不要生成水印或 Logo");

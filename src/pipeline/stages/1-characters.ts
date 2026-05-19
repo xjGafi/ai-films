@@ -41,15 +41,13 @@ export async function runCharactersStage(
     const providedImagePath = configCharMap.get(char.name);
 
     if (providedImagePath && fs.existsSync(providedImagePath)) {
-      // 用户提供了图片，仅作为正面参考图复制
-      const frontFileName = `${char.name}-ref-front.png`;
-      const frontPath = path.join(charsDir, frontFileName);
-      fs.copyFileSync(providedImagePath, frontPath);
-      artifacts[`characters/${frontFileName}`] = `characters/${frontFileName}`;
+      const refFileName = `${char.name}-ref-front.png`;
+      const refPath = path.join(charsDir, refFileName);
+      fs.copyFileSync(providedImagePath, refPath);
+      artifacts[`characters/${refFileName}`] = `characters/${refFileName}`;
     } else {
-      // 生成正面全身图
-      const frontFileName = `${char.name}-ref-front.png`;
-      const frontPath = path.join(charsDir, frontFileName);
+      const refFileName = `${char.name}-ref-front.png`;
+      const refPath = path.join(charsDir, refFileName);
       tasks.push(
         limit(async () => {
           const prompt = buildCharacterRefPrompt(
@@ -60,27 +58,8 @@ export async function runCharactersStage(
           const buffer = await generateImage(prompt, {
             seed: state.config.seed,
           });
-          saveBuffer(buffer, frontPath);
-          artifacts[`characters/${frontFileName}`] =
-            `characters/${frontFileName}`;
-        }),
-      );
-
-      // 生成 3/4 侧面全身图
-      const tqFileName = `${char.name}-ref-34.png`;
-      const tqPath = path.join(charsDir, tqFileName);
-      tasks.push(
-        limit(async () => {
-          const prompt = buildCharacterRefPrompt(
-            char,
-            state.config.style,
-            "three-quarter",
-          );
-          const buffer = await generateImage(prompt, {
-            seed: state.config.seed,
-          });
-          saveBuffer(buffer, tqPath);
-          artifacts[`characters/${tqFileName}`] = `characters/${tqFileName}`;
+          saveBuffer(buffer, refPath);
+          artifacts[`characters/${refFileName}`] = `characters/${refFileName}`;
         }),
       );
     }
