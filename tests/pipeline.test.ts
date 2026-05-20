@@ -13,9 +13,9 @@ dotenv.config();
 
 const FIXTURES = path.resolve(import.meta.dirname, "fixtures");
 
-function loadJsonConfig(filename: string): ProjectConfig {
+function loadJsonConfig(fixtureDir: string): ProjectConfig {
   const raw = JSON.parse(
-    fs.readFileSync(path.join(FIXTURES, filename), "utf-8"),
+    fs.readFileSync(path.join(fixtureDir, "film.json"), "utf-8"),
   );
   return {
     story: raw.story,
@@ -29,103 +29,125 @@ function loadJsonConfig(filename: string): ProjectConfig {
   };
 }
 
-describe("Pipeline", () => {
-  let tmpDir: string;
+// 自动发现所有纯数字命名的 fixture 目录
+const fixtureDirs = fs
+  .readdirSync(FIXTURES)
+  .filter((d) => /^\d+$/.test(d))
+  .sort();
 
-  beforeAll(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-films-pipeline-"));
+for (const dir of fixtureDirs) {
+  const fixtureDir = path.join(FIXTURES, dir);
+  const hasJson = fs.existsSync(path.join(fixtureDir, "film.json"));
+  const hasTxt = fs.existsSync(path.join(fixtureDir, "film.txt"));
+
+  describe(dir, () => {
+    let tmpDir: string;
+
+    beforeAll(() => {
+      tmpDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), `ai-films-pipeline-${dir}-`),
+      );
+    });
+
+    afterAll(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    if (hasJson) {
+      it("从 JSON 配置跑全流程", async () => {
+        const config = loadJsonConfig(fixtureDir);
+        const projectDir = createProject(tmpDir, config);
+
+        await runPipeline(projectDir);
+
+        const state = ProjectState.load(projectDir);
+        expect(state.isCompleted("screenplay")).toBe(true);
+        expect(state.isCompleted("characters")).toBe(true);
+        expect(state.isCompleted("storyboard")).toBe(true);
+        expect(state.isCompleted("prompts")).toBe(true);
+        expect(state.isCompleted("video-gen")).toBe(true);
+        expect(state.isCompleted("transitions")).toBe(true);
+        expect(state.isCompleted("assembly")).toBe(true);
+
+        expect(fs.existsSync(path.join(projectDir, "screenplay.json"))).toBe(
+          true,
+        );
+        expect(
+          fs.readdirSync(path.join(projectDir, "characters")).length,
+        ).toBeGreaterThan(0);
+        expect(
+          fs.readdirSync(path.join(projectDir, "clips")).length,
+        ).toBeGreaterThan(0);
+      });
+    }
+
+    if (hasTxt) {
+      it("从 TXT 故事文本跑全流程", async () => {
+        const storyText = fs.readFileSync(
+          path.join(fixtureDir, "film.txt"),
+          "utf-8",
+        );
+        const parsed = await parseStory(storyText);
+
+        const config: ProjectConfig = {
+          story: parsed.story,
+          duration: parsed.duration,
+          style: parsed.style,
+          seed: parsed.seed,
+          resolution: parsed.resolution,
+          aspectRatio: parsed.aspectRatio,
+          characters: parsed.characters as CharacterInput[],
+          scenes: parsed.scenes,
+        };
+
+        const projectDir = createProject(tmpDir, config);
+        await runPipeline(projectDir);
+
+        const state = ProjectState.load(projectDir);
+        expect(state.isCompleted("screenplay")).toBe(true);
+        expect(state.isCompleted("assembly")).toBe(true);
+      });
+    }
+
+    if (hasJson) {
+      it("从指定 stage 恢复执行", async () => {
+        const config = loadJsonConfig(fixtureDir);
+        const projectDir = createProject(tmpDir, config);
+
+        await runPipeline(projectDir);
+        const stateBefore = ProjectState.load(projectDir);
+        expect(stateBefore.isCompleted("prompts")).toBe(true);
+
+        await runPipeline(projectDir, { fromStage: "prompts" });
+
+        const stateAfter = ProjectState.load(projectDir);
+        expect(stateAfter.isCompleted("prompts")).toBe(true);
+        expect(stateAfter.isCompleted("video-gen")).toBe(true);
+        expect(stateAfter.isCompleted("assembly")).toBe(true);
+      });
+
+      it("重试失败的 stage", async () => {
+        const config = loadJsonConfig(fixtureDir);
+        const projectDir = createProject(tmpDir, config);
+
+        // 先跑完 screenplay
+        await runPipeline(projectDir);
+
+        // 模拟 characters 失败
+        const state = ProjectState.load(projectDir);
+        state.resetFrom("characters");
+        state.recordError("characters", "simulated failure");
+        state.save();
+
+        expect(state.stages.characters.status).toBe("failed");
+
+        // 从 characters 重跑
+        await runPipeline(projectDir, { fromStage: "characters" });
+
+        const recovered = ProjectState.load(projectDir);
+        expect(recovered.isCompleted("characters")).toBe(true);
+        expect(recovered.isCompleted("assembly")).toBe(true);
+      });
+    }
   });
-
-  afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it("从 JSON 配置跑全流程", async () => {
-    const config = loadJsonConfig("film.json");
-    const projectDir = createProject(tmpDir, config);
-
-    await runPipeline(projectDir);
-
-    const state = ProjectState.load(projectDir);
-    expect(state.isCompleted("screenplay")).toBe(true);
-    expect(state.isCompleted("characters")).toBe(true);
-    expect(state.isCompleted("storyboard")).toBe(true);
-    expect(state.isCompleted("prompts")).toBe(true);
-    expect(state.isCompleted("video-gen")).toBe(true);
-    expect(state.isCompleted("transitions")).toBe(true);
-    expect(state.isCompleted("assembly")).toBe(true);
-
-    expect(fs.existsSync(path.join(projectDir, "screenplay.json"))).toBe(true);
-    expect(
-      fs.readdirSync(path.join(projectDir, "characters")).length,
-    ).toBeGreaterThan(0);
-    expect(
-      fs.readdirSync(path.join(projectDir, "clips")).length,
-    ).toBeGreaterThan(0);
-  });
-
-  it("从 TXT 故事文本跑全流程", async () => {
-    const storyText = fs.readFileSync(
-      path.join(FIXTURES, "story.txt"),
-      "utf-8",
-    );
-    const parsed = await parseStory(storyText);
-
-    const config: ProjectConfig = {
-      story: parsed.story,
-      duration: parsed.duration,
-      style: parsed.style,
-      seed: parsed.seed,
-      resolution: parsed.resolution,
-      aspectRatio: parsed.aspectRatio,
-      characters: parsed.characters as CharacterInput[],
-      scenes: parsed.scenes,
-    };
-
-    const projectDir = createProject(tmpDir, config);
-    await runPipeline(projectDir);
-
-    const state = ProjectState.load(projectDir);
-    expect(state.isCompleted("screenplay")).toBe(true);
-    expect(state.isCompleted("assembly")).toBe(true);
-  });
-
-  it("从指定 stage 恢复执行", async () => {
-    const config = loadJsonConfig("film.json");
-    const projectDir = createProject(tmpDir, config);
-
-    await runPipeline(projectDir);
-    const stateBefore = ProjectState.load(projectDir);
-    expect(stateBefore.isCompleted("prompts")).toBe(true);
-
-    await runPipeline(projectDir, { fromStage: "prompts" });
-
-    const stateAfter = ProjectState.load(projectDir);
-    expect(stateAfter.isCompleted("prompts")).toBe(true);
-    expect(stateAfter.isCompleted("video-gen")).toBe(true);
-    expect(stateAfter.isCompleted("assembly")).toBe(true);
-  });
-
-  it("重试失败的 stage", async () => {
-    const config = loadJsonConfig("film.json");
-    const projectDir = createProject(tmpDir, config);
-
-    // 先跑完 screenplay
-    await runPipeline(projectDir);
-
-    // 模拟 characters 失败
-    const state = ProjectState.load(projectDir);
-    state.resetFrom("characters");
-    state.recordError("characters", "simulated failure");
-    state.save();
-
-    expect(state.stages.characters.status).toBe("failed");
-
-    // 从 characters 重跑
-    await runPipeline(projectDir, { fromStage: "characters" });
-
-    const recovered = ProjectState.load(projectDir);
-    expect(recovered.isCompleted("characters")).toBe(true);
-    expect(recovered.isCompleted("assembly")).toBe(true);
-  });
-});
+}
