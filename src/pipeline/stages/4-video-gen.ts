@@ -182,19 +182,21 @@ export async function runVideoGenStage(
         const existingRefs = nextConfig.referenceImageRefs ?? [];
         nextConfig.referenceImageRefs = [lastFramePath, ...existingRefs];
 
-        // 2. 更新 materialDesc — 在素材说明开头插入衔接参考，已有索引 +1
+        // 2. 更新 materialDesc 和 constraints — 已有索引全部 +1，再插入衔接参考行
+        const shiftRefs = (s: string) =>
+          s.replace(/@图片(\d+)/g, (_, n) => `@图片${Number(n) + 1}`);
+
         if (nextConfig.materialDesc) {
-          // 将已有的 @图片 N 索引全部 +1
-          const shiftedMaterial = nextConfig.materialDesc.replace(
-            /@图片 (\d+)/g,
-            (_, n) => `@图片 ${Number(n) + 1}`,
-          );
-          // 在【素材说明】后插入衔接参考行
-          const insertLine = "@图片 1 作为衔接参考，这是上一段的最后一帧。";
+          const shiftedMaterial = shiftRefs(nextConfig.materialDesc);
+          const insertLine = "@图片1 作为衔接参考，这是上一段的最后一帧。";
           nextConfig.materialDesc = shiftedMaterial.replace(
             "【素材说明】\n",
             `【素材说明】\n${insertLine}\n`,
           );
+        }
+
+        if (nextConfig.constraints) {
+          nextConfig.constraints = shiftRefs(nextConfig.constraints);
         }
 
         // 3. 重建 continuityNote
@@ -208,7 +210,7 @@ export async function runVideoGenStage(
         if (sameScene) {
           nextConfig.continuityNote = [
             "【衔接要求】",
-            "@图片 1 是上一段的结尾画面。开场必须与此画面完全一致：",
+            "@图片1 是上一段的结尾画面。开场必须与此画面完全一致：",
             "• 相同背景、家具、物体、空间布局",
             "• 相同光线方向、强度和色温",
             "• 相同镜头角度和距离",
@@ -218,7 +220,7 @@ export async function runVideoGenStage(
         } else {
           nextConfig.continuityNote = [
             "【衔接要求】",
-            "@图片 1 是上一段的结尾画面。平滑过渡到新场景：",
+            "@图片1 是上一段的结尾画面。平滑过渡到新场景：",
             "• 保持角色外观和服装一致",
             "• 使用自然过渡（角色转身/行走，揭示新环境）",
             `前段结尾动作：${currentLastShot?.action ?? "上一场景"}`,
