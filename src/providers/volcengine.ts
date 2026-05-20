@@ -125,6 +125,8 @@ export async function submitVideoTask(
     ],
   };
 
+  body.generate_audio = true;
+
   if (params.image) body.image = params.image;
   if (params.last_frame_image) body.last_frame_image = params.last_frame_image;
   if (params.reference_images?.length)
@@ -209,7 +211,11 @@ export async function pollVideoTask(taskId: string): Promise<VideoResult> {
 
     if (status === "FAILED" || status === "failed" || status === "error") {
       const errorMsg =
-        data.error_message ?? data.data?.error_message ?? "Unknown error";
+        data.error?.message ??
+        data.error?.code ??
+        data.error_message ??
+        data.data?.error_message ??
+        "Unknown error";
       log("video-poll:failed", data);
       throw new Error(`Video task failed: ${errorMsg}`);
     }
