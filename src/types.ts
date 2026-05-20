@@ -102,6 +102,7 @@ export interface ShotSpec {
   pace?: "slow" | "medium" | "fast";
   actionContinuous?: boolean; // true if action flows from previous shot
   scene?: string; // scene identifier for transition logic
+  dialogue?: string; // "康小达（character-3）：能量不是越多越好，进不去门的能量，就是毁掉农场的洪水！"
 }
 
 export interface CharacterSpec {

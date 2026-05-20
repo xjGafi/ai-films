@@ -417,6 +417,17 @@ function buildMaterialDesc(
 
 // ── 分镜序列构建 ──
 
+/**
+ * 从 "角色名（character-N）：台词内容" 格式中提取纯台词文本。
+ */
+function extractDialogueText(dialogue: string): string {
+  const match = dialogue.match(/^.+?[：:]\s*/);
+  if (match) {
+    return dialogue.slice(match[0].length);
+  }
+  return dialogue;
+}
+
 function buildShotSequence(shots: ShotSpec[]): string {
   const lines: string[] = ["【分镜序列】"];
 
@@ -430,7 +441,14 @@ function buildShotSequence(shots: ShotSpec[]): string {
       CAMERA_MOVE_MAP[shot.camera?.split(" ")[0] ?? ""] ??
       shot.camera;
 
-    lines.push(`镜头 ${idx}：${typeZh}${cameraZh}，${shot.action}`);
+    let line = `镜头 ${idx}：${typeZh}${cameraZh}，${shot.action}`;
+
+    if (shot.dialogue) {
+      const dialogueText = extractDialogueText(shot.dialogue);
+      line += `，说 {${dialogueText}}`;
+    }
+
+    lines.push(line);
   }
 
   return lines.join("\n");
