@@ -95,12 +95,17 @@ program
     const config: ProjectConfig = {
       story,
       duration:
-        parseInt(opts.duration, 10) ?? fileConfig.duration ?? DEFAULT_DURATION,
+        opts.duration !== String(DEFAULT_DURATION)
+          ? parseInt(opts.duration, 10)
+          : (fileConfig.duration ?? DEFAULT_DURATION),
       style:
         opts.style !== DEFAULT_STYLE
           ? opts.style
           : (fileConfig.style ?? DEFAULT_STYLE),
-      seed: parseInt(opts.seed, 10) ?? fileConfig.seed ?? DEFAULT_SEED,
+      seed:
+        opts.seed !== String(DEFAULT_SEED)
+          ? parseInt(opts.seed, 10)
+          : (fileConfig.seed ?? DEFAULT_SEED),
       resolution:
         opts.resolution !== DEFAULT_RESOLUTION
           ? opts.resolution
