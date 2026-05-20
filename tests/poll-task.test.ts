@@ -5,6 +5,7 @@ interface TaskResponse {
   status?: string;
   content?: { video_url?: string; duration?: number };
   output?: { video_url?: string };
+  error?: { message?: string; code?: string };
   error_message?: string;
   data?: {
     status?: string;
@@ -41,7 +42,11 @@ function parseTaskResponse(data: TaskResponse): PollResult {
 
   if (FAILURE.has(status)) {
     const error =
-      data.error_message ?? data.data?.error_message ?? "Unknown error";
+      data.error?.message ??
+      data.error?.code ??
+      data.error_message ??
+      data.data?.error_message ??
+      "Unknown error";
     return { done: true, status, error };
   }
 
